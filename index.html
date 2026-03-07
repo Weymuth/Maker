@@ -186,8 +186,8 @@ function GS() {
     .tab.on{background:#fff;color:${T.text1};font-weight:500;box-shadow:0 1px 4px rgba(0,0,0,.08)}
     .empty{text-align:center;padding:48px 20px;color:${T.text3}}
     .empty-icon{font-size:36px;margin-bottom:8px}.empty p{font-size:13px;color:${T.text2}}
-    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:70px 16px 40px;overflow-y:auto;animation:fadeIn .18s ease;backdrop-filter:blur(4px)}
-    .modal{background:#fff;border-radius:20px;width:100%;max-width:580px;box-shadow:${T.shadowMd};animation:fadeUp .22s ease}
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:64px 16px 40px;overflow-y:auto;animation:fadeIn .18s ease;backdrop-filter:blur(4px);-webkit-overflow-scrolling:touch}
+    .modal{background:#fff;border-radius:20px;width:100%;max-width:580px;box-shadow:0 4px 24px rgba(0,0,0,.10);animation:fadeUp .22s ease;margin-bottom:40px}
     .modal-hd{padding:20px 24px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${T.border}}
     .modal-hd h2{font-size:17px;font-weight:600;letter-spacing:-.02em}
     .modal-bd{padding:20px 24px;display:flex;flex-direction:column;gap:16px}
@@ -343,12 +343,19 @@ function StudentPortal(props) {
     setShowForm(true);
   }
 
-  // Duplicate detection
+  // Fuzzy duplicate detection - checks for shared significant words
   var dupWarning = useMemo(function(){
-    if (!form.itemDescription || form.itemDescription.length<4) return null;
-    var desc = form.itemDescription.toLowerCase();
-    var dup = requests.find(function(r){ return r.id!==editingId && r.studentName===user.name && (r.itemDescription||"").toLowerCase().indexOf(desc.slice(0,8))>=0; });
-    return dup ? "Heads up — you may have already submitted something similar: \""+dup.itemDescription+"\"" : null;
+    if (!form.itemDescription || form.itemDescription.length < 4) return null;
+    var stopWords = {a:1,an:1,the:1,of:1,for:1,and:1,or:1,in:1,to:1,with:1,pack:1,set:1,lot:1};
+    var words = form.itemDescription.toLowerCase().split(/\s+/).filter(function(w){ return w.length > 2 && !stopWords[w]; });
+    if (words.length === 0) return null;
+    var dup = requests.find(function(r){
+      if (r.id === editingId || r.studentName !== user.name) return false;
+      var existing = (r.itemDescription||"").toLowerCase();
+      var matches = words.filter(function(w){ return existing.indexOf(w) >= 0; });
+      return matches.length >= Math.min(2, words.length);
+    });
+    return dup ? "Heads up — this looks similar to a request you already submitted: \"" + dup.itemDescription + "\"" : null;
   }, [form.itemDescription, requests, editingId, user.name]);
 
   function submit(e) {
@@ -413,24 +420,50 @@ function StudentPortal(props) {
       <div className="card">
         <div className="card-hd"><h3>My Requests</h3><span style={{color:T.text3,fontSize:12}}>{mine.length} item{mine.length!==1?"s":""}</span></div>
         {mine.length===0 ? <div className="empty"><div className="empty-icon">📋</div><p>No requests yet. Hit the button above to start!</p></div> : (
-          <div style={{overflowX:"auto"}}>
-            <table className="tbl">
-              <thead><tr><th></th><th>Item</th><th>Vendor</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Status</th><th>Notes from Teacher</th><th></th></tr></thead>
-              <tbody>{mine.map(function(r){return (
-                <tr key={r.id}>
-                  <td>{r.priority==="High"&&<span title="High Priority" style={{fontSize:13}}>🔴</span>}</td>
-                  <td style={{fontWeight:500,maxWidth:200}}>{r.itemDescription}</td>
-                  <td style={{fontSize:12,color:T.text2}}>{r.link?<a href={r.link} target="_blank" rel="noreferrer">{r.vendor} ↗</a>:r.vendor}</td>
-                  <td style={{textAlign:"center"}}>{r.quantity}</td>
-                  <td>{fmtMoney(r.pricePerUnit)}</td>
-                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
-                  <td style={{fontSize:11,color:T.text2}}>{r.phase.split("—")[0].trim()}</td>
-                  <td><StatusBadge r={r}/></td>
-                  <td style={{maxWidth:180,fontSize:12,color:T.text2,fontStyle:r.teacherNotes?"normal":"italic"}}>{r.teacherNotes||"—"}</td>
-                  <td>{r.teacherStatus==="Revision"&&<button className="btn btn-yellow btn-sm" onClick={function(){openRevise(r);}}>Edit →</button>}</td>
-                </tr>
-              );})}</tbody>
-            </table>
+          <div style={{display:"flex",flexDirection:"column"}}>
+            {mine.map(function(r){
+              var steps = [
+                {label:"Submitted",done:true,date:r.createdAt},
+                {label:"Teacher Review",done:r.teacherStatus==="Approved"||r.teacherStatus==="Denied"||r.submittedForOrder,date:r.teacherActionAt?new Date(r.teacherActionAt).toLocaleDateString():null,denied:r.teacherStatus==="Denied",note:r.teacherStatus==="Revision"?"⚠ "+r.teacherNotes:r.teacherStatus==="Denied"?r.teacherNotes:null},
+                {label:"Sent to Purchasing",done:r.submittedForOrder,date:r.dateSubmitted},
+                {label:"Dept Head Approval",done:r.jdApproval==="Approved"||r.jdApproval==="Denied",date:r.jdActionAt?new Date(r.jdActionAt).toLocaleDateString():null,denied:r.jdApproval==="Denied"},
+                {label:"Ordered",done:r.jessicaOrdered,date:r.dateOrdered},
+                {label:"Received",done:r.received,date:r.dateReceived},
+              ];
+              return (
+              <div key={r.id} style={{padding:"16px 20px",borderBottom:"1px solid #f5f5f7",display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+                  <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                    {r.priority==="High"&&<span style={{fontSize:13,marginTop:1}}>🔴</span>}
+                    <div>
+                      <div style={{fontWeight:600,fontSize:14}}>{r.itemDescription}</div>
+                      <div style={{fontSize:12,color:T.text2,marginTop:2}}>{r.vendor}{r.link&&<span> · <a href={r.link} target="_blank" rel="noreferrer" style={{color:T.blue}}>View ↗</a></span>} · {r.quantity} × {fmtMoney(r.pricePerUnit)} = <strong>{fmtMoney(getTotal(r))}</strong></div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <StatusBadge r={r}/>
+                    {r.teacherStatus==="Revision"&&<button className="btn btn-yellow btn-sm" onClick={function(){openRevise(r);}}>Edit →</button>}
+                  </div>
+                </div>
+                {r.teacherNotes&&<div style={{background:r.teacherStatus==="Revision"?"#fffbeb":r.teacherStatus==="Denied"?"#fef2f2":"#f0fdf4",border:"1px solid "+(r.teacherStatus==="Revision"?"#fde68a":r.teacherStatus==="Denied"?"#fecaca":"#bbf7d0"),borderRadius:8,padding:"8px 12px",fontSize:12,color:r.teacherStatus==="Revision"?"#92400e":r.teacherStatus==="Denied"?"#991b1b":"#15803d"}}>
+                  <strong>Mr. Weymuth:</strong> {r.teacherNotes}
+                </div>}
+                <div style={{display:"flex",gap:0,alignItems:"center",marginTop:4}}>
+                  {steps.map(function(step,i){return (
+                    <React.Fragment key={i}>
+                      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:80}}>
+                        <div style={{width:20,height:20,borderRadius:"50%",background:step.denied?"#fecaca":step.done?T.green:"#e5e7eb",border:"2px solid "+(step.denied?T.red:step.done?T.green:"#d1d5db"),display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:step.denied?T.red:step.done?"#fff":"#9ca3af",flexShrink:0}}>
+                          {step.denied?"✗":step.done?"✓":""}
+                        </div>
+                        <div style={{fontSize:9.5,color:step.done?T.text1:T.text3,fontWeight:step.done?500:400,textAlign:"center",lineHeight:1.2}}>{step.label}</div>
+                        {step.date&&<div style={{fontSize:9,color:T.text3,textAlign:"center"}}>{step.date}</div>}
+                      </div>
+                      {i<steps.length-1&&<div style={{flex:1,height:2,background:steps[i+1].done||steps[i+1].denied?"#d1d5db":"#e5e7eb",marginBottom:22,flexShrink:1}}/>}
+                    </React.Fragment>
+                  );})}
+                </div>
+              </div>
+            );})}
           </div>
         )}
       </div>
@@ -791,10 +824,10 @@ function TeacherDash(props) {
                 <div style={{color:T.text2,fontSize:13,marginTop:3}}>{sel.studentName} · {sel.vendor} · {fmtMoney(getTotal(sel))}</div>
               </div>
               <div className="field">
-                <label>{sel.action==="approve"?"Note for student (optional)":sel.action==="revise"?"What needs to change? Student will see this and receive an email.":"Reason for denial — student will be notified."}</label>
+                <label>{sel.action==="approve"?"Note (visible to student if they check)":sel.action==="revise"?"What needs to change? Student will be emailed.":"Reason for denial — student will be emailed."}</label>
                 <textarea className="inp" rows={3} value={notes} onChange={function(e){setNotes(e.target.value);}} style={{resize:"vertical"}} placeholder={sel.action==="revise"?"e.g. Please find this on Amazon instead.":sel.action==="deny"?"e.g. Outside our budget for this phase.":""}/>
               </div>
-              {!EMAIL_CFG.enabled&&<div style={{fontSize:11,color:T.text3,background:"#fafafa",borderRadius:8,padding:"8px 12px"}}>📧 Email notifications are disabled. Enable EmailJS in the config to notify students automatically.</div>}
+              {!EMAIL_CFG.enabled&&(sel.action==="deny"||sel.action==="revise")&&<div style={{fontSize:11,color:T.text3,background:"#fafafa",borderRadius:8,padding:"8px 12px"}}>📧 Email to student is disabled. Enable EmailJS in config to auto-notify on denials and revisions.</div>}
             </div>
             <div className="modal-ft">
               <button onClick={function(){setSel(null);}} className="btn btn-ghost">Cancel</button>
