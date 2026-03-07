@@ -14,240 +14,226 @@
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
 
-const SUPABASE_URL  = "https://qkzjwupaxsdholcnckkc.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFremp3dXBheHNkaG9sY25ja2tjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4Mzc0MDUsImV4cCI6MjA4ODQxMzQwNX0.46urGQBW4OxHyGp_j3B459MbRHCp5CsqOX1SZQSwYtk";
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+var SUPABASE_URL  = "https://qkzjwupaxsdholcnckkc.supabase.co";
+var SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFremp3dXBheHNkaG9sY25ja2tjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4Mzc0MDUsImV4cCI6MjA4ODQxMzQwNX0.46urGQBW4OxHyGp_j3B459MbRHCp5CsqOX1SZQSwYtk";
+var DB_KEY = "makerslab-v2";
 
-// Try Supabase, fall back to localStorage if anything fails
-let sbClient = null;
-try {
-  sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-} catch(e) {
-  console.warn("Supabase init failed, using localStorage", e);
+var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// ── DB helpers — zero async/await ─────────────────────────────────────────────
+function dbLoad(cb) {
+  sb.from("kv_store").select("value").eq("key", DB_KEY).single().then(function(res) {
+    if (res.error || !res.data) { cb([]); return; }
+    var v = res.data.value;
+    cb(Array.isArray(v) ? v : (typeof v === "string" ? JSON.parse(v) : []));
+  }).catch(function() { cb([]); });
 }
 
-function dbGet(k) {
-  if (sbClient) {
-    return sbClient.from("kv_store").select("value").eq("key",k).single()
-      .then(function(res) {
-        if (res.error || !res.data) return null;
-        var val = res.data.value;
-        return typeof val === "string" ? JSON.parse(val) : val;
-      }).catch(function() { return null; });
-  }
-  try { var v=localStorage.getItem(k); return Promise.resolve(v?JSON.parse(v):null); } catch(e) { return Promise.resolve(null); }
+function dbSave(data, cb) {
+  console.log("dbSave called, records:", data.length);
+  sb.from("kv_store").upsert({key: DB_KEY, value: data}, {onConflict: "key"}).then(function(res) {
+    if (res.error) { console.error("Save error:", res.error); }
+    else { console.log("Save OK"); }
+    if (cb) cb();
+  }).catch(function(e) { console.error("Save exception:", e); if (cb) cb(); });
 }
 
-function dbSet(k,v) {
-  var payload = typeof v === "string" ? JSON.parse(v) : v;
-  console.log("dbSet writing", k, JSON.stringify(payload).slice(0,80));
-  if (sbClient) {
-    return sbClient.from("kv_store").upsert({key:k, value:payload},{onConflict:"key"})
-      .then(function(res) {
-        if (res.error) console.error("Supabase write error", res.error);
-        else console.log("Supabase write OK");
-      }).catch(function(e) { console.error("Supabase write exception", e); });
-  }
-  try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {}
-  return Promise.resolve();
-}
-
-const AUTH_CONFIG = {
-  teacher: { passcode:"makers2025",  label:"Mr. Weymuth"   },
-  jd:      { passcode:"jdb2025",     label:"JD Bennett"    },
-  jessica: { passcode:"jessica2025", label:"Jessica Coons" },
+// ── AUTH ──────────────────────────────────────────────────────────────────────
+var AUTH = {
+  teacher: { pass:"makers2025", label:"Mr. Weymuth"   },
+  jd:      { pass:"jdb2025",    label:"JD Bennett"    },
+  jessica: { pass:"jessica2025",label:"Jessica Coons" },
 };
-function signIn(role, name, passcode) {
-  if (true) return { ok:true, user:{ role: role==="student"?"student":role, name: role==="student"?name:AUTH_CONFIG[role]?.label||role } };
-  if (role === "student") return { ok:true, user:{ role:"student", name } };
-  const c = AUTH_CONFIG[role];
-  if (c && passcode === c.passcode) return { ok:true, user:{ role, name:c.label } };
+function signIn(role, name, pass) {
+  if (role === "student") return { ok:true, user:{ role:"student", name:name } };
+  // passwords disabled for testing - any pass works
+  if (AUTH[role]) return { ok:true, user:{ role:role, name:AUTH[role].label } };
   return { ok:false };
 }
 
-const { useState, useEffect, useCallback, useMemo } = React;
-
-const STUDENTS = ["Alishya","Annie","Arman","Asami","Daniel","Dior","Duc","Frederick","Ian","Jack","James","Jason","Joe","Jonny","Josh","Julia","Kate","Katie","Lexi","Liam","Lilly","Matt","Meaghan","MK","Noah","Paxton","Ryan","Sean","Tyson","Will"].sort();
-const PHASES   = ["Phase 1 — Now to Winter Break","Phase 2 — Winter to Spring Break","Phase 3 — Spring Break to Expo"];
-const VENDORS  = ["Amazon","Home Depot","Lowes","Ace Hardware","Bambu Labs","Micro Center","Harbor Freight","Other"];
+var STUDENTS = ["Alishya","Annie","Arman","Asami","Daniel","Dior","Duc","Frederick","Ian","Jack","James","Jason","Joe","Jonny","Josh","Julia","Kate","Katie","Lexi","Liam","Lilly","Matt","Meaghan","MK","Noah","Paxton","Ryan","Sean","Tyson","Will"].sort();
+var PHASES   = ["Phase 1 — Now to Winter Break","Phase 2 — Winter to Spring Break","Phase 3 — Spring Break to Expo"];
+var VENDORS  = ["Amazon","Home Depot","Lowes","Ace Hardware","Bambu Labs","Micro Center","Harbor Freight","Other"];
 
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function today() { return new Date().toISOString().slice(0,10); }
-function fmt$(n) { return (n!=null&&n!=="") ? "$"+Number(n).toFixed(2) : "—"; }
-function getTotal(r) { const q=parseFloat(r.quantity),p=parseFloat(r.pricePerUnit); return(!isNaN(q)&&!isNaN(p))?q*p:null; }
+function fmtMoney(n) { return (n != null && n !== "") ? "$" + Number(n).toFixed(2) : "—"; }
+function getTotal(r) { var q=parseFloat(r.quantity), p=parseFloat(r.pricePerUnit); return (!isNaN(q)&&!isNaN(p)) ? q*p : null; }
 
-const GlobalStyles = () => (
-<style>{`
-  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
-  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  html,body{font-family:'DM Sans',sans-serif;background:#f0f2f5;color:#111827;min-height:100vh}
-  input,select,textarea,button{font-family:inherit}
-  ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:4px}
-  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
-  .fu{animation:fadeUp .3s ease both}.fi{animation:fadeIn .2s ease both}
-  .syne{font-family:'Syne',sans-serif}
-  .card{background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden}
-  .card-hd{padding:14px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-  .card-hd h3{font-family:'Syne',sans-serif;font-size:14px;font-weight:700}
-  .tbl{width:100%;border-collapse:collapse;font-size:13px}
-  .tbl th{background:#f9fafb;color:#6b7280;font-weight:600;font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;padding:9px 12px;text-align:left;border-bottom:2px solid #e5e7eb;white-space:nowrap}
-  .tbl td{padding:9px 12px;border-bottom:1px solid #f3f4f6;vertical-align:middle}
-  .tbl tr:last-child td{border-bottom:none}
-  .tbl tr:hover td{background:#fafafa}
-  .tbl tr.revise-row td{background:#fffbeb}
-  .tbl a{color:#1d4ed8;text-decoration:none;font-size:12px}.tbl a:hover{text-decoration:underline}
-  .inp{background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 11px;font-size:13.5px;color:#111827;transition:border .15s;width:100%}
-  .inp:focus{border-color:#1d4ed8;outline:none}
-  select.inp{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;padding-right:28px;cursor:pointer}
-  .btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:8px 15px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer;transition:all .15s;white-space:nowrap}
-  .btn:disabled{opacity:.45;cursor:not-allowed}
-  .btn-primary{background:#1d4ed8;color:#fff}.btn-primary:hover:not(:disabled){background:#1e40af}
-  .btn-orange{background:#f04e1f;color:#fff}.btn-orange:hover:not(:disabled){background:#c73d12}
-  .btn-green{background:#16a34a;color:#fff}.btn-green:hover:not(:disabled){background:#15803d}
-  .btn-red{background:#dc2626;color:#fff}.btn-red:hover:not(:disabled){background:#b91c1c}
-  .btn-yellow{background:#d97706;color:#fff}.btn-yellow:hover:not(:disabled){background:#b45309}
-  .btn-ghost{background:transparent;color:#374151;border:1.5px solid #e5e7eb}.btn-ghost:hover:not(:disabled){background:#f9fafb}
-  .btn-sm{padding:5px 11px;font-size:12px;border-radius:6px}
-  .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600}
-  .b-pend{background:#fef3c7;color:#92400e}
-  .b-appr{background:#d1fae5;color:#065f46}
-  .b-deny{background:#fee2e2;color:#991b1b}
-  .b-revise{background:#fef3c7;color:#92400e;animation:pulse 2s ease infinite}
-  .b-ordr{background:#dbeafe;color:#1e40af}
-  .b-recv{background:#d1fae5;color:#065f46}
-  .b-hold{background:#f3e8ff;color:#6b21a8}
-  .field{display:flex;flex-direction:column;gap:4px}
-  .field label{font-size:11.5px;font-weight:600;color:#374151;letter-spacing:.2px}
-  .field label .req{color:#dc2626;margin-left:2px}
-  .ferr{color:#dc2626;font-size:11px;margin-top:1px}
-  .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-  .stat{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px}
-  .stat-v{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;line-height:1.1}
-  .stat-l{font-size:11.5px;color:#6b7280;margin-top:3px;font-weight:500}
-  .tabs{display:flex;gap:2px;background:#f3f4f6;border-radius:10px;padding:3px;width:fit-content}
-  .tab{padding:6px 13px;border-radius:7px;border:none;background:transparent;font-size:12.5px;font-weight:500;color:#6b7280;cursor:pointer;transition:all .15s}
-  .tab.on{background:#fff;color:#111827;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.07)}
-  .empty{text-align:center;padding:40px 20px;color:#9ca3af}
-  .empty-icon{font-size:32px;margin-bottom:6px}.empty p{font-size:13px}
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;animation:fadeIn .2s ease}
-  .modal{background:#fff;border-radius:14px;width:100%;max-width:620px;max-height:92vh;overflow-y:auto;animation:fadeUp .22s ease}
-  .modal-hd{padding:18px 22px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;background:#fff;z-index:1}
-  .modal-hd h2{font-family:'Syne',sans-serif;font-size:17px;font-weight:700}
-  .modal-bd{padding:20px 22px;display:flex;flex-direction:column;gap:14px}
-  .modal-ft{padding:14px 22px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:0;background:#fff}
-  .revise-banner{background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:12px 16px}
-`}</style>
-);
+var useState    = React.useState;
+var useEffect   = React.useEffect;
+var useCallback = React.useCallback;
+var useMemo     = React.useMemo;
 
-function StatusBadge({r}){
-  if(r.received)                   return <span className="badge b-recv">✓ Received</span>;
-  if(r.jessicaOrdered)             return <span className="badge b-ordr">Ordered</span>;
-  if(r.jdApproval==="Approved")    return <span className="badge b-ordr">Awaiting Order</span>;
-  if(r.jdApproval==="Denied")      return <span className="badge b-deny">JD Denied</span>;
-  if(r.submittedForOrder)          return <span className="badge b-ordr">With JD</span>;
-  if(r.teacherStatus==="Approved") return <span className="badge b-appr">Teacher ✓</span>;
-  if(r.teacherStatus==="Denied")   return <span className="badge b-deny">Denied</span>;
-  if(r.teacherStatus==="Revision") return <span className="badge b-revise">⚠ Needs Revision</span>;
-  if(r.onHold)                     return <span className="badge b-hold">On Hold</span>;
-  return <span className="badge b-pend">Pending</span>;
+// ── STYLES ────────────────────────────────────────────────────────────────────
+function GlobalStyles() {
+  return React.createElement("style", null, `
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap');
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{font-family:'DM Sans',sans-serif;background:#f0f2f5;color:#111827;min-height:100vh}
+    input,select,textarea,button{font-family:inherit}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .fu{animation:fadeUp .3s ease both}
+    .syne{font-family:'Syne',sans-serif}
+    .card{background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden}
+    .card-hd{padding:14px 20px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .card-hd h3{font-family:'Syne',sans-serif;font-size:14px;font-weight:700}
+    .tbl{width:100%;border-collapse:collapse;font-size:13px}
+    .tbl th{background:#f9fafb;color:#6b7280;font-weight:600;font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;padding:9px 12px;text-align:left;border-bottom:2px solid #e5e7eb;white-space:nowrap}
+    .tbl td{padding:9px 12px;border-bottom:1px solid #f3f4f6;vertical-align:middle}
+    .tbl tr:last-child td{border-bottom:none}
+    .tbl tr:hover td{background:#fafafa}
+    .tbl a{color:#1d4ed8;text-decoration:none;font-size:12px}.tbl a:hover{text-decoration:underline}
+    .inp{background:#fff;border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 11px;font-size:13.5px;color:#111827;transition:border .15s;width:100%}
+    .inp:focus{border-color:#1d4ed8;outline:none}
+    select.inp{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;padding-right:28px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:8px 15px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer;transition:all .15s;white-space:nowrap}
+    .btn:disabled{opacity:.45;cursor:not-allowed}
+    .btn-blue{background:#1d4ed8;color:#fff}.btn-blue:hover:not(:disabled){background:#1e40af}
+    .btn-orange{background:#f04e1f;color:#fff}.btn-orange:hover:not(:disabled){background:#c73d12}
+    .btn-green{background:#16a34a;color:#fff}.btn-green:hover:not(:disabled){background:#15803d}
+    .btn-red{background:#dc2626;color:#fff}.btn-red:hover:not(:disabled){background:#b91c1c}
+    .btn-yellow{background:#d97706;color:#fff}.btn-yellow:hover:not(:disabled){background:#b45309}
+    .btn-ghost{background:transparent;color:#374151;border:1.5px solid #e5e7eb}.btn-ghost:hover:not(:disabled){background:#f9fafb}
+    .btn-sm{padding:5px 11px;font-size:12px;border-radius:6px}
+    .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600}
+    .b-pend{background:#fef3c7;color:#92400e}
+    .b-appr{background:#d1fae5;color:#065f46}
+    .b-deny{background:#fee2e2;color:#991b1b}
+    .b-revise{background:#fef3c7;color:#92400e;animation:pulse 2s ease infinite}
+    .b-ordr{background:#dbeafe;color:#1e40af}
+    .b-recv{background:#d1fae5;color:#065f46}
+    .b-hold{background:#f3e8ff;color:#6b21a8}
+    .field{display:flex;flex-direction:column;gap:4px}
+    .field label{font-size:11.5px;font-weight:600;color:#374151}
+    .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+    .stat{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 18px}
+    .stat-v{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;line-height:1.1}
+    .stat-l{font-size:11.5px;color:#6b7280;margin-top:3px}
+    .tabs{display:flex;gap:2px;background:#f3f4f6;border-radius:10px;padding:3px;width:fit-content}
+    .tab{padding:6px 13px;border-radius:7px;border:none;background:transparent;font-size:12.5px;font-weight:500;color:#6b7280;cursor:pointer;transition:all .15s}
+    .tab.on{background:#fff;color:#111827;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+    .empty{text-align:center;padding:40px 20px;color:#9ca3af}
+    .empty-icon{font-size:32px;margin-bottom:6px}.empty p{font-size:13px}
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;animation:fadeIn .2s ease}
+    .modal{background:#fff;border-radius:14px;width:100%;max-width:600px;max-height:92vh;overflow-y:auto;animation:fadeUp .22s ease}
+    .modal-hd{padding:18px 22px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1}
+    .modal-hd h2{font-family:'Syne',sans-serif;font-size:17px;font-weight:700}
+    .modal-bd{padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+    .modal-ft{padding:14px 22px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:0;background:#fff}
+    .revise-banner{background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:12px 16px}
+  `);
 }
 
-function Topbar({user,onLogout,onRefresh,lastSync}){
-  const dot={student:"#f04e1f",teacher:"#1d4ed8",jd:"#7c3aed",jessica:"#0891b2"}[user.role];
-  return(
+function StatusBadge(props) {
+  var r = props.r;
+  if (r.received)                   return React.createElement("span",{className:"badge b-recv"},"✓ Received");
+  if (r.jessicaOrdered)             return React.createElement("span",{className:"badge b-ordr"},"Ordered");
+  if (r.jdApproval==="Approved")    return React.createElement("span",{className:"badge b-ordr"},"Awaiting Order");
+  if (r.jdApproval==="Denied")      return React.createElement("span",{className:"badge b-deny"},"JD Denied");
+  if (r.submittedForOrder)          return React.createElement("span",{className:"badge b-ordr"},"With JD");
+  if (r.teacherStatus==="Approved") return React.createElement("span",{className:"badge b-appr"},"Teacher ✓");
+  if (r.teacherStatus==="Denied")   return React.createElement("span",{className:"badge b-deny"},"Denied");
+  if (r.teacherStatus==="Revision") return React.createElement("span",{className:"badge b-revise"},"⚠ Needs Revision");
+  if (r.onHold)                     return React.createElement("span",{className:"badge b-hold"},"On Hold");
+  return React.createElement("span",{className:"badge b-pend"},"Pending");
+}
+
+// ── TOPBAR ────────────────────────────────────────────────────────────────────
+function Topbar(props) {
+  var dot = {student:"#f04e1f",teacher:"#1d4ed8",jd:"#7c3aed",jessica:"#0891b2"}[props.user.role];
+  return (
     <header style={{background:"#111827",height:54,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 20px",position:"sticky",top:0,zIndex:100}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <div style={{width:30,height:30,background:"#f04e1f",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>⚙️</div>
-        <span className="syne" style={{color:"#fff",fontWeight:800,fontSize:15,letterSpacing:"-.3px"}}>Makers<span style={{color:"#f04e1f"}}>Lab</span></span>
+        <span className="syne" style={{color:"#fff",fontWeight:800,fontSize:15}}>Makers<span style={{color:"#f04e1f"}}>Lab</span></span>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:10}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
         <div style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,.07)",borderRadius:7,padding:"5px 11px"}}>
           <div style={{width:7,height:7,borderRadius:"50%",background:dot}}/>
-          <span style={{color:"#fff",fontSize:12.5,fontWeight:500}}>{user.name}</span>
-          <span style={{color:"#6b7280",fontSize:10,textTransform:"uppercase",letterSpacing:".4px"}}>{user.role}</span>
+          <span style={{color:"#fff",fontSize:12.5,fontWeight:500}}>{props.user.name}</span>
+          <span style={{color:"#6b7280",fontSize:10,textTransform:"uppercase"}}>{props.user.role}</span>
         </div>
-        <div style={{color:"#6b7280",fontSize:10}}>{lastSync?"Synced "+lastSync:""}</div><button onClick={onRefresh} className="btn btn-ghost btn-sm" style={{color:"#9ca3af",borderColor:"#374151",fontSize:11.5}}>↻ Refresh</button><button onClick={onLogout} className="btn btn-ghost btn-sm" style={{color:"#9ca3af",borderColor:"#374151",fontSize:11.5}}>Sign out</button>
+        {props.lastSync && <span style={{color:"#6b7280",fontSize:10}}>synced {props.lastSync}</span>}
+        <button onClick={props.onRefresh} className="btn btn-ghost btn-sm" style={{color:"#9ca3af",borderColor:"#374151",fontSize:11}}>↻</button>
+        <button onClick={props.onLogout} className="btn btn-ghost btn-sm" style={{color:"#9ca3af",borderColor:"#374151",fontSize:11}}>Sign out</button>
       </div>
     </header>
   );
 }
 
-function Login({onLogin}){
-  const [mode,setMode]=useState(null);
-  const [studentName,setStudentName]=useState("");
-  const [staffRole,setStaffRole]=useState("teacher");
-  const [passcode,setPasscode]=useState("");
-  const [err,setErr]=useState("");
+// ── LOGIN ─────────────────────────────────────────────────────────────────────
+function Login(props) {
+  var _s = useState(null); var mode = _s[0]; var setMode = _s[1];
+  var _n = useState(""); var studentName = _n[0]; var setStudentName = _n[1];
+  var _r = useState("teacher"); var staffRole = _r[0]; var setStaffRole = _r[1];
+  var _p = useState(""); var passcode = _p[0]; var setPasscode = _p[1];
+  var _e = useState(""); var err = _e[0]; var setErr = _e[1];
 
-  function submit(e){
-    e.preventDefault();setErr("");
-    if(mode==="student"){
-      if(!studentName){setErr("Please select your name.");return;}
-      onLogin(signIn("student",studentName).user);
-    }else{
-      const r=signIn(staffRole,"",passcode);
-      if(!r.ok){setErr("Incorrect passcode.");return;}
-      onLogin(r.user);
+  function submit(e) {
+    e.preventDefault(); setErr("");
+    if (mode === "student") {
+      if (!studentName) { setErr("Please select your name."); return; }
+      props.onLogin(signIn("student", studentName, "").user);
+    } else {
+      var r = signIn(staffRole, "", passcode);
+      if (!r.ok) { setErr("Incorrect passcode."); return; }
+      props.onLogin(r.user);
     }
   }
 
-  return(
+  return (
     <div style={{minHeight:"100vh",background:"#0f1117",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{width:"100%",maxWidth:420}}>
         <div style={{textAlign:"center",marginBottom:32}}>
           <div style={{width:60,height:60,background:"#f04e1f",borderRadius:14,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:28,marginBottom:14}}>⚙️</div>
-          <h1 className="syne" style={{color:"#fff",fontSize:28,fontWeight:800,letterSpacing:"-1px"}}>Makers<span style={{color:"#f04e1f"}}>Lab</span></h1>
+          <h1 className="syne" style={{color:"#fff",fontSize:28,fontWeight:800}}>Makers<span style={{color:"#f04e1f"}}>Lab</span></h1>
           <p style={{color:"#6b7280",fontSize:13,marginTop:5}}>Purchase Request System</p>
         </div>
-        {!mode?(
+        {!mode ? (
           <div className="fu" style={{display:"flex",flexDirection:"column",gap:10}}>
-            {[{id:"student",icon:"🎓",title:"I'm a Student",sub:"Submit and track your purchase requests"},
-              {id:"staff",icon:"🏫",title:"I'm a Staff Member",sub:"Teacher, Department Head, or Purchasing"}].map(opt=>(
-              <button key={opt.id} onClick={()=>setMode(opt.id)}
-                style={{background:"rgba(255,255,255,.04)",border:"1.5px solid rgba(255,255,255,.09)",borderRadius:11,padding:"18px 20px",color:"#fff",textAlign:"left",cursor:"pointer",transition:"border-color .15s"}}
-                onMouseEnter={e=>e.currentTarget.style.borderColor=opt.id==="student"?"#f04e1f":"#1d4ed8"}
-                onMouseLeave={e=>e.currentTarget.style.borderColor="rgba(255,255,255,.09)"}>
-                <div style={{fontSize:22,marginBottom:7}}>{opt.icon}</div>
-                <div className="syne" style={{fontWeight:700,fontSize:15}}>{opt.title}</div>
-                <div style={{color:"#9ca3af",fontSize:12.5,marginTop:2}}>{opt.sub}</div>
-              </button>
-            ))}
-            <p style={{color:"#374151",fontSize:11,textAlign:"center",marginTop:4}}>🔒 Students only see their own requests</p>
+            {[{id:"student",icon:"🎓",title:"I'm a Student",sub:"Submit and track your requests"},
+              {id:"staff",icon:"🏫",title:"I'm Staff",sub:"Teacher, Dept. Head, or Purchasing"}].map(function(opt) {
+              return (
+                <button key={opt.id} onClick={function(){setMode(opt.id);}}
+                  style={{background:"rgba(255,255,255,.04)",border:"1.5px solid rgba(255,255,255,.09)",borderRadius:11,padding:"18px 20px",color:"#fff",textAlign:"left",cursor:"pointer"}}>
+                  <div style={{fontSize:22,marginBottom:7}}>{opt.icon}</div>
+                  <div className="syne" style={{fontWeight:700,fontSize:15}}>{opt.title}</div>
+                  <div style={{color:"#9ca3af",fontSize:12.5,marginTop:2}}>{opt.sub}</div>
+                </button>
+              );
+            })}
           </div>
-        ):(
+        ) : (
           <form onSubmit={submit} className="fu" style={{background:"rgba(255,255,255,.04)",border:"1.5px solid rgba(255,255,255,.08)",borderRadius:14,padding:24,display:"flex",flexDirection:"column",gap:14}}>
             <h2 className="syne" style={{color:"#fff",fontSize:17,fontWeight:700}}>{mode==="student"?"Select your name":"Staff Sign In"}</h2>
-            {mode==="student"?(
+            {mode==="student" ? (
               <div className="field">
-                <label style={{color:"#9ca3af"}}>Student Name <span className="req">*</span></label>
-                <select className="inp" value={studentName} onChange={e=>setStudentName(e.target.value)} style={{background:"#1c2333",borderColor:"#2d3748",color:"#fff"}}>
+                <label style={{color:"#9ca3af"}}>Your Name</label>
+                <select className="inp" value={studentName} onChange={function(e){setStudentName(e.target.value);}} style={{background:"#1c2333",borderColor:"#2d3748",color:"#fff"}}>
                   <option value="">— Choose your name —</option>
-                  {STUDENTS.map(s=><option key={s} value={s}>{s}</option>)}
+                  {STUDENTS.map(function(s){return <option key={s} value={s}>{s}</option>;})}
                 </select>
               </div>
-            ):(
-              <>
-                <div className="field">
-                  <label style={{color:"#9ca3af"}}>Role</label>
-                  <select className="inp" value={staffRole} onChange={e=>setStaffRole(e.target.value)} style={{background:"#1c2333",borderColor:"#2d3748",color:"#fff"}}>
-                    <option value="teacher">Mr. Weymuth (Teacher)</option>
-                    <option value="jd">JD Bennett (Dept. Head)</option>
-                    <option value="jessica">Jessica Coons (Purchasing)</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label style={{color:"#9ca3af"}}>Passcode</label>
-                  <input type="password" className="inp" value={passcode} onChange={e=>setPasscode(e.target.value)} placeholder="Enter passcode" style={{background:"#1c2333",borderColor:"#2d3748",color:"#fff"}}/>
-                </div>
-              </>
+            ) : (
+              <div className="field">
+                <label style={{color:"#9ca3af"}}>Role</label>
+                <select className="inp" value={staffRole} onChange={function(e){setStaffRole(e.target.value);}} style={{background:"#1c2333",borderColor:"#2d3748",color:"#fff"}}>
+                  <option value="teacher">Mr. Weymuth (Teacher)</option>
+                  <option value="jd">JD Bennett (Dept. Head)</option>
+                  <option value="jessica">Jessica Coons (Purchasing)</option>
+                </select>
+              </div>
             )}
-            {err&&<div style={{background:"#450a0a",border:"1px solid #7f1d1d",borderRadius:7,padding:"8px 11px",color:"#fca5a5",fontSize:12.5}}>{err}</div>}
-            <div style={{display:"flex",gap:8,marginTop:2}}>
-              <button type="button" onClick={()=>{setMode(null);setErr("");setPasscode("");}} className="btn btn-ghost" style={{flex:1,color:"#9ca3af",borderColor:"#374151"}}>← Back</button>
-              <button type="submit" className={`btn ${mode==="student"?"btn-orange":"btn-primary"}`} style={{flex:2}}>{mode==="student"?"Enter Portal →":"Sign In →"}</button>
+            {err && <div style={{background:"#450a0a",border:"1px solid #7f1d1d",borderRadius:7,padding:"8px 11px",color:"#fca5a5",fontSize:12.5}}>{err}</div>}
+            <div style={{display:"flex",gap:8}}>
+              <button type="button" onClick={function(){setMode(null);}} className="btn btn-ghost" style={{flex:1,color:"#9ca3af",borderColor:"#374151"}}>← Back</button>
+              <button type="submit" className={"btn " + (mode==="student"?"btn-orange":"btn-blue")} style={{flex:2}}>Enter →</button>
             </div>
           </form>
         )}
@@ -256,171 +242,161 @@ function Login({onLogin}){
   );
 }
 
-const EMPTY={itemDescription:"",vendor:"",vendorOther:"",link:"",quantity:"",pricePerUnit:"",consumableOrDurable:"Consumable",additionalDetails:"",phase:PHASES[0]};
+// ── STUDENT PORTAL ────────────────────────────────────────────────────────────
+function StudentPortal(props) {
+  var user=props.user, requests=props.requests, onSave=props.onSave;
+  var mine = useMemo(function(){return requests.filter(function(r){return r.studentName===user.name;});}, [requests,user.name]);
+  var needsRevision = useMemo(function(){return mine.filter(function(r){return r.teacherStatus==="Revision";});}, [mine]);
+  var _sf = useState(false); var showForm=_sf[0]; var setShowForm=_sf[1];
+  var _ei = useState(null); var editingId=_ei[0]; var setEditingId=_ei[1];
+  var BLANK = {itemDescription:"",vendor:"",vendorOther:"",link:"",quantity:"",pricePerUnit:"",consumableOrDurable:"Consumable",additionalDetails:"",phase:PHASES[0]};
+  var _f = useState(BLANK); var form=_f[0]; var setForm=_f[1];
 
-function StudentPortal({user,requests,onSave}){
-  const mine=useMemo(()=>requests.filter(r=>r.studentName===user.name),[requests,user.name]);
-  const needsRevision=useMemo(()=>mine.filter(r=>r.teacherStatus==="Revision"),[mine]);
-  const [showForm,setShowForm]=useState(false);
-  const [editingId,setEditingId]=useState(null);
-  const [form,setForm]=useState(EMPTY);
-  const [errors,setErrors]=useState({});
-  const [saving,setSaving]=useState(false);
+  function sf(k,v){setForm(function(p){var n={}; for(var x in p)n[x]=p[x]; n[k]=v; return n;});}
 
-  function sf(k,v){setForm(p=>({...p,[k]:v}));setErrors(p=>({...p,[k]:""}));}
-  function openNew(){setEditingId(null);setForm(EMPTY);setShowForm(true);}
+  function openNew(){setEditingId(null);setForm(BLANK);setShowForm(true);}
   function openRevise(r){
     setEditingId(r.id);
-    setForm({
-      itemDescription:r.itemDescription,
-      vendor:VENDORS.includes(r.vendor)?r.vendor:"Other",
-      vendorOther:VENDORS.includes(r.vendor)?"":r.vendor,
+    setForm({itemDescription:r.itemDescription,vendor:VENDORS.indexOf(r.vendor)>=0?r.vendor:"Other",
+      vendorOther:VENDORS.indexOf(r.vendor)>=0?"":r.vendor,
       link:r.link||"",quantity:String(r.quantity),pricePerUnit:String(r.pricePerUnit),
-      consumableOrDurable:r.consumableOrDurable,additionalDetails:r.additionalDetails||"",phase:r.phase,
-    });
+      consumableOrDurable:r.consumableOrDurable,additionalDetails:r.additionalDetails||"",phase:r.phase});
     setShowForm(true);
   }
 
-  function validate(){
-    const e={};
-    if(!form.itemDescription.trim()) e.itemDescription="Required";
-    if(!form.vendor) e.vendor="Required";
-    if(form.vendor==="Other"&&!form.vendorOther.trim()) e.vendorOther="Required";
-    if(form.quantity===""||isNaN(form.quantity)||Number(form.quantity)<1) e.quantity="Enter a valid quantity";
-    if(form.pricePerUnit===""||isNaN(form.pricePerUnit)||Number(form.pricePerUnit)<=0) e.pricePerUnit="Enter a valid price";
-    return e;
-  }
-
-  async function submit(e){
+  function submit(e) {
     e.preventDefault();
-    const ev=validate();if(Object.keys(ev).length){setErrors(ev);return;}
-    setSaving(true);
-    const vendorVal=form.vendor==="Other"?form.vendorOther.trim():form.vendor;
-    if(editingId){
-      const updated=requests.map(r=>r.id===editingId?{...r,itemDescription:form.itemDescription.trim(),vendor:vendorVal,link:form.link.trim(),quantity:Number(form.quantity),pricePerUnit:Number(form.pricePerUnit),consumableOrDurable:form.consumableOrDurable,additionalDetails:form.additionalDetails.trim(),phase:form.phase,teacherStatus:"Pending",teacherNotes:"",revisedAt:today()}:r);
-      await onSave(updated);
-    }else{
-      const req={id:genId(),studentName:user.name,itemDescription:form.itemDescription.trim(),vendor:vendorVal,link:form.link.trim(),quantity:Number(form.quantity),pricePerUnit:Number(form.pricePerUnit),consumableOrDurable:form.consumableOrDurable,additionalDetails:form.additionalDetails.trim(),phase:form.phase,onHold:false,teacherStatus:"Pending",teacherNotes:"",submittedForOrder:false,dateSubmitted:null,jdApproval:"Pending",jdNotes:"",jessicaOrdered:false,dateOrdered:null,received:false,dateReceived:null,createdAt:today()};
-      await onSave([...requests,req]);
+    var vendorVal = form.vendor==="Other" ? form.vendorOther.trim() : form.vendor;
+    if (editingId) {
+      var updated = requests.map(function(r) {
+        if (r.id!==editingId) return r;
+        return Object.assign({},r,{itemDescription:form.itemDescription.trim(),vendor:vendorVal,
+          link:form.link.trim(),quantity:Number(form.quantity)||1,pricePerUnit:Number(form.pricePerUnit)||0,
+          consumableOrDurable:form.consumableOrDurable,additionalDetails:form.additionalDetails.trim(),
+          phase:form.phase,teacherStatus:"Pending",teacherNotes:"",revisedAt:today()});
+      });
+      onSave(updated);
+    } else {
+      var req = {id:genId(),studentName:user.name,itemDescription:form.itemDescription.trim()||"(no description)",
+        vendor:vendorVal||"Amazon",link:form.link.trim(),quantity:Number(form.quantity)||1,
+        pricePerUnit:Number(form.pricePerUnit)||0,consumableOrDurable:form.consumableOrDurable,
+        additionalDetails:form.additionalDetails.trim(),phase:form.phase,
+        onHold:false,teacherStatus:"Pending",teacherNotes:"",
+        submittedForOrder:false,dateSubmitted:null,
+        jdApproval:"Pending",jdNotes:"",
+        jessicaOrdered:false,dateOrdered:null,received:false,dateReceived:null,createdAt:today()};
+      onSave(requests.concat([req]));
     }
-    setForm(EMPTY);setShowForm(false);setEditingId(null);setSaving(false);
+    setForm(BLANK);setShowForm(false);setEditingId(null);
   }
 
-  const qty=Number(form.quantity),price=Number(form.pricePerUnit);
-  const estTotal=(form.quantity!==""&&form.pricePerUnit!==""&&!isNaN(qty)&&!isNaN(price)&&qty>0&&price>0)?(qty*price).toFixed(2):null;
+  var qty=Number(form.quantity),price=Number(form.pricePerUnit);
+  var estTotal=(form.quantity!==""&&form.pricePerUnit!==""&&qty>0&&price>0)?(qty*price).toFixed(2):null;
 
-  return(
+  return (
     <div style={{maxWidth:940,margin:"0 auto",padding:"22px 16px",display:"flex",flexDirection:"column",gap:18}} className="fu">
       <div style={{background:"linear-gradient(130deg,#f04e1f,#fb923c)",borderRadius:12,padding:"18px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:16,flexWrap:"wrap"}}>
         <div>
           <h2 className="syne" style={{color:"#fff",fontSize:20,fontWeight:800}}>Hey, {user.name}! 👋</h2>
-          <p style={{color:"rgba(255,255,255,.8)",fontSize:12.5,marginTop:3}}>Submit requests below. Your teacher reviews everything — check status updates here.</p>
+          <p style={{color:"rgba(255,255,255,.8)",fontSize:12.5,marginTop:3}}>Submit requests below — your teacher reviews everything.</p>
         </div>
         <button onClick={openNew} className="btn" style={{background:"#fff",color:"#f04e1f",fontWeight:700}}>+ New Request</button>
       </div>
 
-      {needsRevision.length>0&&(
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {needsRevision.map(r=>(
-            <div key={r.id} className="revise-banner">
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-                <div>
-                  <div style={{fontWeight:700,fontSize:13,color:"#92400e"}}>⚠️ Revision Requested: {r.itemDescription}</div>
-                  <div style={{fontSize:12.5,color:"#78350f",marginTop:3}}><strong>Mr. Weymuth says:</strong> {r.teacherNotes||"Please update this request."}</div>
-                </div>
-                <button onClick={()=>openRevise(r)} className="btn btn-yellow btn-sm">Edit &amp; Resubmit →</button>
-              </div>
+      {needsRevision.length>0 && needsRevision.map(function(r){return (
+        <div key={r.id} className="revise-banner">
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:13,color:"#92400e"}}>⚠️ Revision Requested: {r.itemDescription}</div>
+              <div style={{fontSize:12.5,color:"#78350f",marginTop:3}}><strong>Mr. Weymuth says:</strong> {r.teacherNotes||"Please update this request."}</div>
             </div>
-          ))}
+            <button onClick={function(){openRevise(r);}} className="btn btn-yellow btn-sm">Edit &amp; Resubmit →</button>
+          </div>
         </div>
-      )}
+      );})}
 
       <div className="g3">
-        {[{v:mine.length,l:"Total Requests",c:"#111827"},{v:mine.filter(r=>r.teacherStatus==="Approved").length,l:"Approved",c:"#16a34a"},{v:mine.filter(r=>r.received).length,l:"Received",c:"#1d4ed8"}].map(s=>(
+        {[{v:mine.length,l:"Total",c:"#111827"},{v:mine.filter(function(r){return r.teacherStatus==="Approved";}).length,l:"Approved",c:"#16a34a"},{v:mine.filter(function(r){return r.received;}).length,l:"Received",c:"#1d4ed8"}].map(function(s){return (
           <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
-        ))}
+        );})}
       </div>
 
       <div className="card">
         <div className="card-hd"><h3>My Requests</h3><span style={{color:"#9ca3af",fontSize:12}}>{mine.length} item{mine.length!==1?"s":""}</span></div>
-        {mine.length===0?<div className="empty"><div className="empty-icon">📋</div><p>No requests yet. Hit "New Request" to get started!</p></div>:(
+        {mine.length===0 ? <div className="empty"><div className="empty-icon">📋</div><p>No requests yet!</p></div> : (
           <div style={{overflowX:"auto"}}>
             <table className="tbl">
-              <thead><tr><th>Item</th><th>Vendor</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Status</th><th>Teacher Notes</th><th></th></tr></thead>
-              <tbody>{mine.map(r=>(
-                <tr key={r.id} className={r.teacherStatus==="Revision"?"revise-row":""}>
-                  <td style={{maxWidth:200}}><div style={{fontWeight:500}}>{r.itemDescription}</div>{r.additionalDetails&&<div style={{color:"#9ca3af",fontSize:11,marginTop:1}}>{r.additionalDetails.slice(0,55)}{r.additionalDetails.length>55?"…":""}</div>}</td>
+              <thead><tr><th>Item</th><th>Vendor</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Status</th><th>Notes</th><th></th></tr></thead>
+              <tbody>{mine.map(function(r){return (
+                <tr key={r.id}>
+                  <td style={{maxWidth:200,fontWeight:500}}>{r.itemDescription}</td>
                   <td style={{fontSize:12}}>{r.link?<a href={r.link} target="_blank" rel="noreferrer">{r.vendor} ↗</a>:r.vendor}</td>
                   <td style={{textAlign:"center"}}>{r.quantity}</td>
-                  <td>{fmt$(r.pricePerUnit)}</td>
-                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td>{fmtMoney(r.pricePerUnit)}</td>
+                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
                   <td style={{fontSize:11,color:"#9ca3af"}}>{r.phase.split("—")[0].trim()}</td>
-                  <td><span style={{fontSize:11,color:r.consumableOrDurable==="Durable"?"#7c3aed":"#0891b2"}}>{r.consumableOrDurable}</span></td>
                   <td><StatusBadge r={r}/></td>
-                  <td style={{maxWidth:160,fontSize:11,color:"#9ca3af"}}>{r.teacherNotes||"—"}</td>
-                  <td>{r.teacherStatus==="Revision"&&<button className="btn btn-yellow btn-sm" onClick={()=>openRevise(r)}>Edit →</button>}</td>
+                  <td style={{maxWidth:150,fontSize:11,color:"#9ca3af"}}>{r.teacherNotes||"—"}</td>
+                  <td>{r.teacherStatus==="Revision"&&<button className="btn btn-yellow btn-sm" onClick={function(){openRevise(r);}}>Edit →</button>}</td>
                 </tr>
-              ))}</tbody>
+              );})}</tbody>
             </table>
           </div>
         )}
       </div>
 
-      {showForm&&(
-        <div className="overlay" onClick={e=>e.target===e.currentTarget&&setShowForm(false)}>
+      {showForm && (
+        <div className="overlay" onClick={function(e){if(e.target===e.currentTarget)setShowForm(false);}}>
           <div className="modal">
             <div className="modal-hd">
-              <h2>{editingId?"✏️ Edit & Resubmit Request":"New Purchase Request"}</h2>
-              <button onClick={()=>setShowForm(false)} style={{background:"none",border:"none",fontSize:22,color:"#9ca3af",cursor:"pointer",lineHeight:1}}>×</button>
+              <h2>{editingId?"✏️ Edit & Resubmit":"New Purchase Request"}</h2>
+              <button onClick={function(){setShowForm(false);}} style={{background:"none",border:"none",fontSize:22,color:"#9ca3af",cursor:"pointer"}}>×</button>
             </div>
-            {editingId&&<div style={{background:"#fffbeb",borderBottom:"1px solid #fcd34d",padding:"10px 22px",fontSize:12.5,color:"#92400e"}}>⚠️ Make your changes and resubmit — it goes back to your teacher for review.</div>}
             <form onSubmit={submit}>
               <div className="modal-bd">
+                <div className="field"><label>Item Description</label>
+                  <input className="inp" value={form.itemDescription} onChange={function(e){sf("itemDescription",e.target.value);}} placeholder="Be specific — brand, model, size, color…"/>
+                </div>
+                <div className="g2">
+                  <div className="field"><label>Vendor</label>
+                    <select className="inp" value={form.vendor} onChange={function(e){sf("vendor",e.target.value);}}>
+                      <option value="">Select…</option>{VENDORS.map(function(v){return <option key={v}>{v}</option>;})}
+                    </select>
+                  </div>
+                  {form.vendor==="Other" && <div className="field"><label>Vendor Name</label>
+                    <input className="inp" value={form.vendorOther} onChange={function(e){sf("vendorOther",e.target.value);}} placeholder="e.g. Rockler"/>
+                  </div>}
+                </div>
+                <div className="field"><label>Link to Item</label>
+                  <input className="inp" type="url" value={form.link} onChange={function(e){sf("link",e.target.value);}} placeholder="https://…"/>
+                </div>
+                <div className="g2">
+                  <div className="field"><label>Quantity</label>
+                    <input className="inp" type="number" min="1" step="1" value={form.quantity} onChange={function(e){sf("quantity",e.target.value);}} placeholder="How many?"/>
+                  </div>
+                  <div className="field"><label>Price Per Unit ($)</label>
+                    <input className="inp" type="number" step="0.01" min="0" value={form.pricePerUnit} onChange={function(e){sf("pricePerUnit",e.target.value);}} placeholder="0.00"/>
+                  </div>
+                </div>
+                {estTotal && <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"9px 13px",fontSize:13,color:"#1d4ed8"}}>💰 Estimated total: <strong>${estTotal}</strong></div>}
                 <div className="field"><label>Type</label>
-                  <select className="inp" value={form.consumableOrDurable} onChange={e=>sf("consumableOrDurable",e.target.value)}>
+                  <select className="inp" value={form.consumableOrDurable} onChange={function(e){sf("consumableOrDurable",e.target.value);}}>
                     <option value="Consumable">Consumable (used up)</option>
                     <option value="Durable">Durable (reused next year)</option>
                   </select>
                 </div>
-                <div className="field"><label>Item Description <span className="req">*</span></label>
-                  <input className="inp" value={form.itemDescription} onChange={e=>sf("itemDescription",e.target.value)} placeholder="Be specific — brand, model, size, color…"/>
-                  {errors.itemDescription&&<span className="ferr">{errors.itemDescription}</span>}
-                </div>
-                <div className="g2">
-                  <div className="field"><label>Vendor <span className="req">*</span></label>
-                    <select className="inp" value={form.vendor} onChange={e=>sf("vendor",e.target.value)}>
-                      <option value="">Select…</option>{VENDORS.map(v=><option key={v}>{v}</option>)}
-                    </select>{errors.vendor&&<span className="ferr">{errors.vendor}</span>}
-                  </div>
-                  {form.vendor==="Other"&&<div className="field"><label>Vendor Name <span className="req">*</span></label>
-                    <input className="inp" value={form.vendorOther} onChange={e=>sf("vendorOther",e.target.value)} placeholder="e.g. Rockler"/>
-                    {errors.vendorOther&&<span className="ferr">{errors.vendorOther}</span>}
-                  </div>}
-                </div>
-                <div className="field"><label>Link to Item</label>
-                  <input className="inp" type="url" value={form.link} onChange={e=>sf("link",e.target.value)} placeholder="https://amazon.com/…"/>
-                </div>
-                <div className="g2">
-                  <div className="field"><label>Quantity <span className="req">*</span></label>
-                    <input className="inp" type="number" min="1" step="1" value={form.quantity} onChange={e=>sf("quantity",e.target.value)} placeholder="How many?"/>
-                    {errors.quantity&&<span className="ferr">{errors.quantity}</span>}
-                  </div>
-                  <div className="field"><label>Price Per Unit ($) <span className="req">*</span></label>
-                    <input className="inp" type="number" step="0.01" min="0" value={form.pricePerUnit} onChange={e=>sf("pricePerUnit",e.target.value)} placeholder="0.00"/>
-                    {errors.pricePerUnit&&<span className="ferr">{errors.pricePerUnit}</span>}
-                  </div>
-                </div>
-                {estTotal&&<div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"9px 13px",fontSize:13,color:"#1d4ed8"}}>💰 Estimated total: <strong>${estTotal}</strong></div>}
                 <div className="field"><label>Phase — When do you need it?</label>
-                  <select className="inp" value={form.phase} onChange={e=>sf("phase",e.target.value)}>{PHASES.map(p=><option key={p}>{p}</option>)}</select>
+                  <select className="inp" value={form.phase} onChange={function(e){sf("phase",e.target.value);}}>
+                    {PHASES.map(function(p){return <option key={p}>{p}</option>;})}
+                  </select>
                 </div>
                 <div className="field"><label>Additional Details</label>
-                  <textarea className="inp" rows={3} value={form.additionalDetails} onChange={e=>sf("additionalDetails",e.target.value)} placeholder="Color, size, why you need it, any important specs…" style={{resize:"vertical"}}/>
+                  <textarea className="inp" rows={3} value={form.additionalDetails} onChange={function(e){sf("additionalDetails",e.target.value);}} placeholder="Color, size, why you need it…" style={{resize:"vertical"}}/>
                 </div>
               </div>
               <div className="modal-ft">
-                <button type="button" onClick={()=>setShowForm(false)} className="btn btn-ghost">Cancel</button>
-                <button type="submit" className={`btn ${editingId?"btn-yellow":"btn-orange"}`} disabled={saving}>{saving?"Saving…":editingId?"Resubmit for Review →":"Submit Request →"}</button>
+                <button type="button" onClick={function(){setShowForm(false);}} className="btn btn-ghost">Cancel</button>
+                <button type="submit" className={"btn " + (editingId?"btn-yellow":"btn-orange")}>{editingId?"Resubmit →":"Submit Request →"}</button>
               </div>
             </form>
           </div>
@@ -430,187 +406,209 @@ function StudentPortal({user,requests,onSave}){
   );
 }
 
-function TeacherDash({user,requests,onSave}){
-  const [tab,setTab]=useState("pending");
-  const [sel,setSel]=useState(null);
-  const [notes,setNotes]=useState("");
-  const [filterS,setFilterS]=useState("");
-  const [filterP,setFilterP]=useState("");
+// ── TEACHER DASHBOARD ─────────────────────────────────────────────────────────
+function TeacherDash(props) {
+  var user=props.user, requests=props.requests, onSave=props.onSave;
+  var _t=useState("pending"); var tab=_t[0]; var setTab=_t[1];
+  var _s=useState(null); var sel=_s[0]; var setSel=_s[1];
+  var _n=useState(""); var notes=_n[0]; var setNotes=_n[1];
+  var _fs=useState(""); var filterS=_fs[0]; var setFilterS=_fs[1];
+  var _fp=useState(""); var filterP=_fp[0]; var setFilterP=_fp[1];
 
-  const pending  =useMemo(()=>requests.filter(r=>r.teacherStatus==="Pending"&&!r.onHold),[requests]);
-  const onHold   =useMemo(()=>requests.filter(r=>r.onHold),[requests]);
-  const readySend=useMemo(()=>requests.filter(r=>r.teacherStatus==="Approved"&&!r.submittedForOrder),[requests]);
-  const submitted=useMemo(()=>requests.filter(r=>r.submittedForOrder),[requests]);
-  const allF=useMemo(()=>{
-    let l=[...requests].sort((a,b)=>a.studentName.localeCompare(b.studentName));
-    if(filterS) l=l.filter(r=>r.studentName===filterS);
-    if(filterP) l=l.filter(r=>r.phase===filterP);
+  var pending   = useMemo(function(){return requests.filter(function(r){return r.teacherStatus==="Pending"&&!r.onHold;});}, [requests]);
+  var onHold    = useMemo(function(){return requests.filter(function(r){return r.onHold;});}, [requests]);
+  var readySend = useMemo(function(){return requests.filter(function(r){return r.teacherStatus==="Approved"&&!r.submittedForOrder;});}, [requests]);
+  var submitted = useMemo(function(){return requests.filter(function(r){return r.submittedForOrder;});}, [requests]);
+  var allF = useMemo(function(){
+    var l = requests.slice().sort(function(a,b){return a.studentName.localeCompare(b.studentName);});
+    if(filterS) l=l.filter(function(r){return r.studentName===filterS;});
+    if(filterP) l=l.filter(function(r){return r.phase===filterP;});
     return l;
-  },[requests,filterS,filterP]);
+  }, [requests,filterS,filterP]);
 
-  function setStatus(id,status){ const updated=requests.map(r=>r.id===id?{...r,teacherStatus:status,teacherNotes:notes}:r); onSave(updated).then(()=>{setSel(null);setNotes("");}); }
-  function toggleHold(id){ onSave(requests.map(r=>r.id===id?{...r,onHold:!r.onHold}:r)); }
-  function submitBatch(ids){ onSave(requests.map(r=>ids.includes(r.id)?{...r,submittedForOrder:true,dateSubmitted:today()}:r)); }
-  const batchTotal=readySend.reduce((s,r)=>s+(getTotal(r)||0),0);
+  function setStatus(id,status) {
+    var updated = requests.map(function(r){return r.id===id ? Object.assign({},r,{teacherStatus:status,teacherNotes:notes}) : r;});
+    onSave(updated);
+    setSel(null); setNotes("");
+  }
+  function toggleHold(id) {
+    onSave(requests.map(function(r){return r.id===id ? Object.assign({},r,{onHold:!r.onHold}) : r;}));
+  }
+  function submitBatch(ids) {
+    console.log("submitBatch called for ids:", ids.length);
+    var updated = requests.map(function(r){return ids.indexOf(r.id)>=0 ? Object.assign({},r,{submittedForOrder:true,dateSubmitted:today()}) : r;});
+    console.log("submittedForOrder check:", updated.filter(function(r){return r.submittedForOrder;}).length);
+    onSave(updated);
+  }
 
-  function TRow({r,actions}){
-    return(
+  var batchTotal = readySend.reduce(function(s,r){return s+(getTotal(r)||0);}, 0);
+
+  function TRow(p) {
+    var r=p.r;
+    return (
       <tr>
         <td style={{fontWeight:600,fontSize:13}}>{r.studentName}</td>
-        <td style={{maxWidth:190}}>
+        <td style={{maxWidth:180}}>
           <div style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</div>
-          {r.additionalDetails&&<div style={{color:"#9ca3af",fontSize:11,marginTop:1}}>{r.additionalDetails.slice(0,50)}{r.additionalDetails.length>50?"…":""}</div>}
           {r.revisedAt&&<div style={{fontSize:10,color:"#0891b2",marginTop:2}}>↩ Revised {r.revisedAt}</div>}
         </td>
         <td style={{fontSize:12}}>{r.vendor}</td>
         <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
         <td style={{textAlign:"center"}}>{r.quantity}</td>
-        <td>{fmt$(r.pricePerUnit)}</td>
-        <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+        <td>{fmtMoney(r.pricePerUnit)}</td>
+        <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
         <td style={{fontSize:11,color:"#9ca3af"}}>{r.phase.split("—")[0].trim()}</td>
-        <td><span style={{fontSize:11,color:r.consumableOrDurable==="Durable"?"#7c3aed":"#0891b2"}}>{r.consumableOrDurable}</span></td>
-        {actions?<td>{actions(r)}</td>:<td><StatusBadge r={r}/></td>}
+        {p.actions ? <td>{p.actions(r)}</td> : <td><StatusBadge r={r}/></td>}
       </tr>
     );
   }
 
-  return(
+  return (
     <div style={{maxWidth:1140,margin:"0 auto",padding:"22px 16px",display:"flex",flexDirection:"column",gap:18}} className="fu">
       <div>
         <h2 className="syne" style={{fontSize:20,fontWeight:800}}>Teacher Dashboard</h2>
-        <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Review requests · request revisions · build purchase batches · send to JD</p>
+        <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Review · Revise · Submit to JD</p>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10}}>
-        {[{v:requests.length,l:"Total",c:"#111827"},{v:pending.length,l:"Pending",c:"#b45309"},{v:requests.filter(r=>r.teacherStatus==="Revision").length,l:"Needs Revision",c:"#d97706"},{v:readySend.length,l:"Ready to Submit",c:"#1d4ed8"},{v:submitted.filter(r=>!r.received).length,l:"In Progress",c:"#7c3aed"},{v:requests.filter(r=>r.received).length,l:"Received",c:"#16a34a"}].map(s=>(
-          <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:22}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
-        ))}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:10}}>
+        {[{v:requests.length,l:"Total",c:"#111827"},{v:pending.length,l:"Pending",c:"#b45309"},
+          {v:requests.filter(function(r){return r.teacherStatus==="Revision";}).length,l:"Needs Revision",c:"#d97706"},
+          {v:readySend.length,l:"Ready to Submit",c:"#1d4ed8"},
+          {v:submitted.filter(function(r){return !r.received;}).length,l:"In Progress",c:"#7c3aed"},
+          {v:requests.filter(function(r){return r.received;}).length,l:"Received",c:"#16a34a"}].map(function(s){return (
+          <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:20}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
+        );})}
       </div>
       <div className="tabs">
-        {[["pending",`🔍 Pending (${pending.length})`],["readysend",`📦 Submit to JD (${readySend.length})`],["all","📋 All"],["submitted",`✅ Submitted (${submitted.length})`]].map(([k,l])=>(
-          <button key={k} className={`tab${tab===k?" on":""}`} onClick={()=>setTab(k)}>{l}</button>
-        ))}
+        {[["pending","🔍 Pending ("+pending.length+")"],["readysend","📦 Submit to JD ("+readySend.length+")"],["all","📋 All"],["submitted","✅ Submitted ("+submitted.length+")"]].map(function(kl){return (
+          <button key={kl[0]} className={"tab"+(tab===kl[0]?" on":"")} onClick={function(){setTab(kl[0]);}}>{kl[1]}</button>
+        );})}
       </div>
 
-      {tab==="pending"&&(
+      {tab==="pending" && (
         <div className="card">
-          <div className="card-hd"><h3>Awaiting Your Review</h3>{onHold.length>0&&<span style={{fontSize:12,color:"#7c3aed"}}>+ {onHold.length} on hold</span>}</div>
-          {pending.length===0?<div className="empty"><div className="empty-icon">🎉</div><p>All caught up!</p></div>:(
+          <div className="card-hd"><h3>Awaiting Your Review</h3>{onHold.length>0&&<span style={{fontSize:12,color:"#7c3aed"}}>+{onHold.length} on hold</span>}</div>
+          {pending.length===0 ? <div className="empty"><div className="empty-icon">🎉</div><p>All caught up!</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
-              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Actions</th></tr></thead>
-              <tbody>{pending.map(r=>(<TRow key={r.id} r={r} actions={r=>(
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Actions</th></tr></thead>
+              <tbody>{pending.map(function(r){return <TRow key={r.id} r={r} actions={function(r){return (
                 <div style={{display:"flex",gap:5}}>
-                  <button className="btn btn-green btn-sm" title="Approve" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
-                  <button className="btn btn-yellow btn-sm" title="Request Revision" onClick={()=>{setSel({...r,action:"revise"});setNotes("");}}>✏</button>
-                  <button className="btn btn-red btn-sm" title="Deny" onClick={()=>{setSel({...r,action:"deny"});setNotes("");}}>✗</button>
-                  <button className="btn btn-ghost btn-sm" title="Hold" onClick={()=>toggleHold(r.id)}>⏸</button>
+                  <button className="btn btn-green btn-sm" onClick={function(){setSel(Object.assign({},r,{action:"approve"}));setNotes("");}}>✓</button>
+                  <button className="btn btn-yellow btn-sm" onClick={function(){setSel(Object.assign({},r,{action:"revise"}));setNotes("");}}>✏</button>
+                  <button className="btn btn-red btn-sm" onClick={function(){setSel(Object.assign({},r,{action:"deny"}));setNotes("");}}>✗</button>
+                  <button className="btn btn-ghost btn-sm" onClick={function(){toggleHold(r.id);}}>⏸</button>
                 </div>
-              )}/>))}</tbody>
+              );}}/>;})}
+              </tbody>
             </table></div>
           )}
-          {onHold.length>0&&(
+          {onHold.length>0 && (
             <div style={{borderTop:"1px solid #f3f4f6"}}>
               <div style={{padding:"10px 20px",fontSize:12,fontWeight:600,color:"#7c3aed",background:"#faf5ff"}}>⏸ On Hold ({onHold.length})</div>
-              <div style={{overflowX:"auto"}}><table className="tbl"><tbody>{onHold.map(r=>(<TRow key={r.id} r={r} actions={r=>(
-                <div style={{display:"flex",gap:5}}>
-                  <button className="btn btn-green btn-sm" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
-                  <button className="btn btn-ghost btn-sm" onClick={()=>toggleHold(r.id)}>Remove Hold</button>
-                </div>
-              )}/>))}</tbody></table></div>
+              <div style={{overflowX:"auto"}}><table className="tbl"><tbody>
+                {onHold.map(function(r){return <TRow key={r.id} r={r} actions={function(r){return (
+                  <div style={{display:"flex",gap:5}}>
+                    <button className="btn btn-green btn-sm" onClick={function(){setSel(Object.assign({},r,{action:"approve"}));setNotes("");}}>✓</button>
+                    <button className="btn btn-ghost btn-sm" onClick={function(){toggleHold(r.id);}}>Remove Hold</button>
+                  </div>
+                );}}/>;})}
+              </tbody></table></div>
             </div>
           )}
         </div>
       )}
 
-      {tab==="readysend"&&(
+      {tab==="readysend" && (
         <div className="card">
           <div className="card-hd">
-            <h3>Approved — Ready to Submit to JD Bennett</h3>
+            <h3>Approved — Ready to Submit to JD</h3>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
-              {readySend.length>0&&<span style={{fontWeight:700,color:"#16a34a",fontSize:13}}>Batch: {fmt$(batchTotal)}</span>}
-              <button className="btn btn-primary btn-sm" disabled={readySend.length===0} onClick={()=>submitBatch(readySend.map(r=>r.id))}>Submit All {readySend.length} to JD →</button>
+              {readySend.length>0 && <span style={{fontWeight:700,color:"#16a34a",fontSize:13}}>Batch: {fmtMoney(batchTotal)}</span>}
+              <button className="btn btn-blue btn-sm" disabled={readySend.length===0} onClick={function(){submitBatch(readySend.map(function(r){return r.id;}));}}>Submit All {readySend.length} to JD →</button>
             </div>
           </div>
-          {readySend.length===0?<div className="empty"><div className="empty-icon">📭</div><p>No approved items waiting to submit.</p></div>:(
+          {readySend.length===0 ? <div className="empty"><div className="empty-icon">📭</div><p>Nothing ready to submit.</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
-              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Action</th></tr></thead>
-              <tbody>{readySend.map(r=>(<TRow key={r.id} r={r} actions={r=>(<button className="btn btn-primary btn-sm" onClick={()=>submitBatch([r.id])}>Submit →</button>)}/>))}</tbody>
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Action</th></tr></thead>
+              <tbody>{readySend.map(function(r){return <TRow key={r.id} r={r} actions={function(r){return <button className="btn btn-blue btn-sm" onClick={function(){submitBatch([r.id]);}}>Submit →</button>;}}/>;})}
+              </tbody>
               <tfoot><tr>
-                <td colSpan={6} style={{textAlign:"right",fontWeight:700,background:"#f9fafb",padding:"10px 12px"}}>Batch Total:</td>
-                <td style={{fontWeight:700,fontSize:14,background:"#f9fafb",padding:"10px 12px"}}>{fmt$(batchTotal)}</td>
-                <td colSpan={3} style={{background:"#f9fafb"}}/>
+                <td colSpan={6} style={{textAlign:"right",fontWeight:700,background:"#f9fafb",padding:"10px 12px"}}>Total:</td>
+                <td style={{fontWeight:700,background:"#f9fafb",padding:"10px 12px"}}>{fmtMoney(batchTotal)}</td>
+                <td colSpan={2} style={{background:"#f9fafb"}}/>
               </tr></tfoot>
             </table></div>
           )}
         </div>
       )}
 
-      {tab==="all"&&(
+      {tab==="all" && (
         <div className="card">
           <div className="card-hd">
             <h3>All Requests</h3>
             <div style={{display:"flex",gap:8}}>
-              <select className="inp" style={{fontSize:12,padding:"5px 26px 5px 9px",height:30,width:140}} value={filterS} onChange={e=>setFilterS(e.target.value)}>
-                <option value="">All Students</option>{STUDENTS.map(s=><option key={s}>{s}</option>)}
+              <select className="inp" style={{fontSize:12,padding:"5px 26px 5px 9px",height:30,width:140}} value={filterS} onChange={function(e){setFilterS(e.target.value);}}>
+                <option value="">All Students</option>{STUDENTS.map(function(s){return <option key={s}>{s}</option>;})}
               </select>
-              <select className="inp" style={{fontSize:12,padding:"5px 26px 5px 9px",height:30,width:130}} value={filterP} onChange={e=>setFilterP(e.target.value)}>
-                <option value="">All Phases</option>{PHASES.map(p=><option key={p} value={p}>{p.split("—")[0].trim()}</option>)}
+              <select className="inp" style={{fontSize:12,padding:"5px 26px 5px 9px",height:30,width:130}} value={filterP} onChange={function(e){setFilterP(e.target.value);}}>
+                <option value="">All Phases</option>{PHASES.map(function(p){return <option key={p} value={p}>{p.split("—")[0].trim()}</option>;})}
               </select>
             </div>
           </div>
-          {allF.length===0?<div className="empty"><p>No requests found.</p></div>:(
+          {allF.length===0 ? <div className="empty"><p>No requests.</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
-              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Status</th></tr></thead>
-              <tbody>{allF.map(r=><TRow key={r.id} r={r} actions={null}/>)}</tbody>
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Status</th></tr></thead>
+              <tbody>{allF.map(function(r){return <TRow key={r.id} r={r} actions={null}/>;})}
+              </tbody>
             </table></div>
           )}
         </div>
       )}
 
-      {tab==="submitted"&&(
+      {tab==="submitted" && (
         <div className="card">
-          <div className="card-hd"><h3>Submitted to JD / In Progress</h3></div>
-          {submitted.length===0?<div className="empty"><p>Nothing submitted yet.</p></div>:(
+          <div className="card-hd"><h3>Submitted to JD</h3></div>
+          {submitted.length===0 ? <div className="empty"><p>Nothing submitted yet.</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
               <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Submitted</th><th>JD</th><th>Ordered</th><th>Received</th></tr></thead>
-              <tbody>{submitted.map(r=>(
+              <tbody>{submitted.map(function(r){return (
                 <tr key={r.id}>
                   <td style={{fontWeight:600}}>{r.studentName}</td>
                   <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
                   <td style={{fontSize:12}}>{r.vendor}</td>
-                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
                   <td style={{fontSize:11}}>{r.dateSubmitted||"—"}</td>
                   <td>{r.jdApproval==="Approved"?<span className="badge b-appr">✓</span>:r.jdApproval==="Denied"?<span className="badge b-deny">✗</span>:<span className="badge b-pend">Pending</span>}</td>
-                  <td>{r.jessicaOrdered?<span className="badge b-ordr">✓ {r.dateOrdered}</span>:"—"}</td>
+                  <td>{r.jessicaOrdered?<span className="badge b-ordr">✓</span>:"—"}</td>
                   <td>{r.received?<span className="badge b-recv">✓</span>:"—"}</td>
                 </tr>
-              ))}</tbody>
+              );})}</tbody>
             </table></div>
           )}
         </div>
       )}
 
-      {sel&&(
-        <div className="overlay" onClick={e=>e.target===e.currentTarget&&setSel(null)}>
+      {sel && (
+        <div className="overlay" onClick={function(e){if(e.target===e.currentTarget)setSel(null);}}>
           <div className="modal" style={{maxWidth:460}}>
             <div className="modal-hd">
-              <h2>{sel.action==="approve"?"✅ Approve":sel.action==="revise"?"✏️ Request Revision":"❌ Deny"} Request</h2>
-              <button onClick={()=>setSel(null)} style={{background:"none",border:"none",fontSize:22,color:"#9ca3af",cursor:"pointer"}}>×</button>
+              <h2>{sel.action==="approve"?"✅ Approve":sel.action==="revise"?"✏️ Request Revision":"❌ Deny"}</h2>
+              <button onClick={function(){setSel(null);}} style={{background:"none",border:"none",fontSize:22,color:"#9ca3af",cursor:"pointer"}}>×</button>
             </div>
             <div className="modal-bd">
               <div style={{background:"#f9fafb",borderRadius:8,padding:"11px 14px"}}>
                 <div style={{fontWeight:600}}>{sel.itemDescription}</div>
-                <div style={{color:"#6b7280",fontSize:12,marginTop:2}}>{sel.studentName} · {sel.vendor} · {fmt$(getTotal(sel))}</div>
+                <div style={{color:"#6b7280",fontSize:12,marginTop:2}}>{sel.studentName} · {sel.vendor} · {fmtMoney(getTotal(sel))}</div>
               </div>
               <div className="field">
-                <label>{sel.action==="approve"?"Note for student (optional)":sel.action==="revise"?"What needs to change? (student will see this)":"Reason for denial (student will see this)"}{sel.action!=="approve"&&<span className="req"> *</span>}</label>
-                <textarea className="inp" rows={3} value={notes} onChange={e=>setNotes(e.target.value)} placeholder={sel.action==="revise"?"e.g. Too expensive — find on Amazon instead.":"Reason…"} style={{resize:"vertical"}}/>
+                <label>{sel.action==="approve"?"Note (optional)":sel.action==="revise"?"What needs to change? (student sees this)":"Reason (student sees this)"}</label>
+                <textarea className="inp" rows={3} value={notes} onChange={function(e){setNotes(e.target.value);}} style={{resize:"vertical"}} placeholder={sel.action==="revise"?"e.g. Please find on Amazon instead.":""}/>
               </div>
             </div>
             <div className="modal-ft">
-              <button onClick={()=>setSel(null)} className="btn btn-ghost">Cancel</button>
-              {sel.action==="approve"&&<button onClick={()=>setStatus(sel.id,"Approved")} className="btn btn-green">Approve</button>}
-              {sel.action==="revise"&&<button onClick={()=>{if(!notes.trim()){alert("Please add a note for the student.");return;}setStatus(sel.id,"Revision");}} className="btn btn-yellow">Request Revision</button>}
-              {sel.action==="deny"&&<button onClick={()=>setStatus(sel.id,"Denied")} className="btn btn-red">Deny Request</button>}
+              <button onClick={function(){setSel(null);}} className="btn btn-ghost">Cancel</button>
+              {sel.action==="approve" && <button onClick={function(){setStatus(sel.id,"Approved");}} className="btn btn-green">Approve</button>}
+              {sel.action==="revise" && <button onClick={function(){if(!notes.trim()){alert("Please add a note.");return;}setStatus(sel.id,"Revision");}} className="btn btn-yellow">Request Revision</button>}
+              {sel.action==="deny" && <button onClick={function(){setStatus(sel.id,"Denied");}} className="btn btn-red">Deny</button>}
             </div>
           </div>
         </div>
@@ -619,125 +617,135 @@ function TeacherDash({user,requests,onSave}){
   );
 }
 
-function JDDash({user,requests,onSave}){
-  const toReview=useMemo(()=>requests.filter(r=>!!r.submittedForOrder&&(r.jdApproval==="Pending"||!r.jdApproval)),[requests]);
-  const approved=useMemo(()=>requests.filter(r=>r.jdApproval==="Approved"&&!r.jessicaOrdered),[requests]);
-  const history =useMemo(()=>requests.filter(r=>r.jessicaOrdered||r.received),[requests]);
-  const [tab,setTab]=useState("review");
-  const [sel,setSel]=useState(null);
-  const [notes,setNotes]=useState("");
+// ── JD DASHBOARD ──────────────────────────────────────────────────────────────
+function JDDash(props) {
+  var requests=props.requests, onSave=props.onSave;
+  var _t=useState("review"); var tab=_t[0]; var setTab=_t[1];
+  var _s=useState(null); var sel=_s[0]; var setSel=_s[1];
+  var _n=useState(""); var notes=_n[0]; var setNotes=_n[1];
 
-  function decide(id,decision){ const updated=requests.map(r=>r.id===id?{...r,jdApproval:decision,jdNotes:notes}:r); onSave(updated).then(()=>{setSel(null);setNotes("");}); }
-  const reviewTotal=toReview.reduce((s,r)=>s+(getTotal(r)||0),0);
-  const approvedTotal=approved.reduce((s,r)=>s+(getTotal(r)||0),0);
+  var toReview = useMemo(function(){return requests.filter(function(r){return r.submittedForOrder&&r.jdApproval==="Pending";});}, [requests]);
+  var approved = useMemo(function(){return requests.filter(function(r){return r.jdApproval==="Approved"&&!r.jessicaOrdered;});}, [requests]);
+  var history  = useMemo(function(){return requests.filter(function(r){return r.jessicaOrdered||r.received;});}, [requests]);
 
-  return(
+  function decide(id,decision) {
+    var updated = requests.map(function(r){return r.id===id ? Object.assign({},r,{jdApproval:decision,jdNotes:notes}) : r;});
+    onSave(updated);
+    setSel(null); setNotes("");
+  }
+
+  var reviewTotal  = toReview.reduce(function(s,r){return s+(getTotal(r)||0);}, 0);
+  var approvedTotal = approved.reduce(function(s,r){return s+(getTotal(r)||0);}, 0);
+
+  return (
     <div style={{maxWidth:1100,margin:"0 auto",padding:"22px 16px",display:"flex",flexDirection:"column",gap:18}} className="fu">
-      <div style={{background:'#1e293b',color:'#94a3b8',fontSize:11,padding:'8px 14px',borderRadius:8,fontFamily:'monospace',marginBottom:4}}>
-        DEBUG: total={requests.length} | submitted={requests.filter(r=>r.submittedForOrder).length} | submittedTrue={requests.filter(r=>!!r.submittedForOrder).length} | firstVal={requests.length>0?JSON.stringify(requests[0].submittedForOrder):"none"} | pendingJD={requests.filter(r=>r.jdApproval==='Pending').length} | toReview={toReview.length}
-      </div>
       <div>
         <h2 className="syne" style={{fontSize:20,fontWeight:800}}>Department Head — JD Bennett</h2>
-        <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Review purchase batches submitted by Mr. Weymuth</p>
+        <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Review batches submitted by Mr. Weymuth</p>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
-        {[{v:toReview.length,l:"Awaiting Your Review",c:"#b45309"},{v:fmt$(reviewTotal),l:"Batch Value",c:"#b45309"},{v:fmt$(approvedTotal),l:"Approved — Not Yet Ordered",c:"#1d4ed8"},{v:history.length,l:"Ordered / Received",c:"#16a34a"}].map(s=>(
-          <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:22}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
-        ))}
+      <div style={{background:"#1e293b",color:"#94a3b8",fontSize:11,padding:"8px 14px",borderRadius:8,fontFamily:"monospace"}}>
+        DEBUG: total={requests.length} | submitted={requests.filter(function(r){return r.submittedForOrder;}).length} | toReview={toReview.length}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+        {[{v:toReview.length,l:"Awaiting Review",c:"#b45309"},{v:fmtMoney(reviewTotal),l:"Batch Value",c:"#b45309"},
+          {v:fmtMoney(approvedTotal),l:"Approved — Not Ordered",c:"#1d4ed8"},{v:history.length,l:"Ordered/Received",c:"#16a34a"}].map(function(s){return (
+          <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:20}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
+        );})}
       </div>
       <div className="tabs">
-        {[["review",`🔍 Review (${toReview.length})`],["approved",`✅ Approved (${approved.length})`],["history","📋 History"]].map(([k,l])=>(
-          <button key={k} className={`tab${tab===k?" on":""}`} onClick={()=>setTab(k)}>{l}</button>
-        ))}
+        {[["review","🔍 Review ("+toReview.length+")"],["approved","✅ Approved ("+approved.length+")"],["history","📋 History"]].map(function(kl){return (
+          <button key={kl[0]} className={"tab"+(tab===kl[0]?" on":"")} onClick={function(){setTab(kl[0]);}}>{kl[1]}</button>
+        );})}
       </div>
-      {tab==="review"&&(
+
+      {tab==="review" && (
         <div className="card">
-          <div className="card-hd"><h3>Submitted by Mr. Weymuth</h3>{toReview.length>0&&<span style={{fontWeight:700,fontSize:13}}>Batch: {fmt$(reviewTotal)}</span>}</div>
-          {toReview.length===0?<div className="empty"><div className="empty-icon">🎉</div><p>Nothing to review right now.</p></div>:(
+          <div className="card-hd"><h3>Submitted by Mr. Weymuth</h3>{toReview.length>0&&<span style={{fontWeight:700,fontSize:13}}>{fmtMoney(reviewTotal)}</span>}</div>
+          {toReview.length===0 ? <div className="empty"><div className="empty-icon">🎉</div><p>Nothing to review.</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
-              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Type</th><th>Details</th><th>Action</th></tr></thead>
-              <tbody>{toReview.map(r=>(
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Details</th><th>Action</th></tr></thead>
+              <tbody>{toReview.map(function(r){return (
                 <tr key={r.id}>
                   <td style={{fontWeight:600}}>{r.studentName}</td>
                   <td style={{maxWidth:180,fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
                   <td style={{fontSize:12}}>{r.vendor}</td>
                   <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
                   <td style={{textAlign:"center"}}>{r.quantity}</td>
-                  <td>{fmt$(r.pricePerUnit)}</td>
-                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                  <td style={{fontSize:11}}>{r.consumableOrDurable}</td>
+                  <td>{fmtMoney(r.pricePerUnit)}</td>
+                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
                   <td style={{maxWidth:130,fontSize:11,color:"#9ca3af"}}>{r.additionalDetails||"—"}</td>
                   <td><div style={{display:"flex",gap:5}}>
-                    <button className="btn btn-green btn-sm" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
-                    <button className="btn btn-red btn-sm" onClick={()=>{setSel({...r,action:"deny"});setNotes("");}}>✗</button>
+                    <button className="btn btn-green btn-sm" onClick={function(){setSel(Object.assign({},r,{action:"approve"}));setNotes("");}}>✓</button>
+                    <button className="btn btn-red btn-sm" onClick={function(){setSel(Object.assign({},r,{action:"deny"}));setNotes("");}}>✗</button>
                   </div></td>
                 </tr>
-              ))}</tbody>
+              );})}</tbody>
             </table></div>
           )}
         </div>
       )}
-      {tab==="approved"&&(
+
+      {tab==="approved" && (
         <div className="card">
-          <div className="card-hd"><h3>JD Approved — Awaiting Jessica</h3>{approved.length>0&&<span style={{fontWeight:700,color:"#16a34a",fontSize:13}}>{fmt$(approvedTotal)}</span>}</div>
-          {approved.length===0?<div className="empty"><p>No items pending order.</p></div>:(
+          <div className="card-hd"><h3>Approved — Awaiting Jessica</h3>{approved.length>0&&<span style={{fontWeight:700,color:"#16a34a",fontSize:13}}>{fmtMoney(approvedTotal)}</span>}</div>
+          {approved.length===0 ? <div className="empty"><p>No items pending order.</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
-              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Total</th><th>Submitted</th></tr></thead>
-              <tbody>{approved.map(r=>(
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Total</th></tr></thead>
+              <tbody>{approved.map(function(r){return (
                 <tr key={r.id}>
                   <td style={{fontWeight:600}}>{r.studentName}</td>
                   <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
                   <td style={{fontSize:12}}>{r.vendor}</td>
                   <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
                   <td style={{textAlign:"center"}}>{r.quantity}</td>
-                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                  <td style={{fontSize:11}}>{r.dateSubmitted||"—"}</td>
+                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
                 </tr>
-              ))}</tbody>
+              );})}</tbody>
             </table></div>
           )}
         </div>
       )}
-      {tab==="history"&&(
+
+      {tab==="history" && (
         <div className="card">
-          <div className="card-hd"><h3>Order History</h3></div>
-          {history.length===0?<div className="empty"><p>No completed orders yet.</p></div>:(
+          <div className="card-hd"><h3>History</h3></div>
+          {history.length===0 ? <div className="empty"><p>No history yet.</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
-              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Ordered</th><th>Status</th></tr></thead>
-              <tbody>{history.map(r=>(
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Status</th></tr></thead>
+              <tbody>{history.map(function(r){return (
                 <tr key={r.id}>
                   <td style={{fontWeight:600}}>{r.studentName}</td>
                   <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
                   <td style={{fontSize:12}}>{r.vendor}</td>
-                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                  <td style={{fontSize:11}}>{r.dateOrdered||"—"}</td>
+                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
                   <td><StatusBadge r={r}/></td>
                 </tr>
-              ))}</tbody>
+              );})}</tbody>
             </table></div>
           )}
         </div>
       )}
-      {sel&&(
-        <div className="overlay" onClick={e=>e.target===e.currentTarget&&setSel(null)}>
+
+      {sel && (
+        <div className="overlay" onClick={function(e){if(e.target===e.currentTarget)setSel(null);}}>
           <div className="modal" style={{maxWidth:460}}>
             <div className="modal-hd">
               <h2>{sel.action==="approve"?"✅ Approve":"❌ Deny"} — {sel.itemDescription}</h2>
-              <button onClick={()=>setSel(null)} style={{background:"none",border:"none",fontSize:22,color:"#9ca3af",cursor:"pointer"}}>×</button>
+              <button onClick={function(){setSel(null);}} style={{background:"none",border:"none",fontSize:22,color:"#9ca3af",cursor:"pointer"}}>×</button>
             </div>
             <div className="modal-bd">
               <div style={{background:"#f9fafb",borderRadius:8,padding:"11px 14px"}}>
                 <div style={{fontWeight:600}}>{sel.itemDescription}</div>
-                <div style={{color:"#6b7280",fontSize:12,marginTop:2}}>{sel.studentName} · {sel.vendor} · {fmt$(getTotal(sel))}</div>
-                {sel.link&&<a href={sel.link} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#1d4ed8",display:"block",marginTop:4}}>View item ↗</a>}
+                <div style={{color:"#6b7280",fontSize:12,marginTop:2}}>{sel.studentName} · {sel.vendor} · {fmtMoney(getTotal(sel))}</div>
+                {sel.link&&<a href={sel.link} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#1d4ed8",display:"block",marginTop:4}}>View ↗</a>}
               </div>
               <div className="field"><label>Notes (optional)</label>
-                <textarea className="inp" rows={3} value={notes} onChange={e=>setNotes(e.target.value)} style={{resize:"vertical"}} placeholder="Any notes…"/>
+                <textarea className="inp" rows={3} value={notes} onChange={function(e){setNotes(e.target.value);}} style={{resize:"vertical"}}/>
               </div>
             </div>
             <div className="modal-ft">
-              <button onClick={()=>setSel(null)} className="btn btn-ghost">Cancel</button>
-              {sel.action==="approve"?<button onClick={()=>decide(sel.id,"Approved")} className="btn btn-green">Approve</button>:<button onClick={()=>decide(sel.id,"Denied")} className="btn btn-red">Deny</button>}
+              <button onClick={function(){setSel(null);}} className="btn btn-ghost">Cancel</button>
+              {sel.action==="approve"?<button onClick={function(){decide(sel.id,"Approved");}} className="btn btn-green">Approve</button>:<button onClick={function(){decide(sel.id,"Denied");}} className="btn btn-red">Deny</button>}
             </div>
           </div>
         </div>
@@ -746,99 +754,102 @@ function JDDash({user,requests,onSave}){
   );
 }
 
-function JessicaDash({user,requests,onSave}){
-  const toOrder =useMemo(()=>requests.filter(r=>r.jdApproval==="Approved"&&!r.jessicaOrdered),[requests]);
-  const ordered =useMemo(()=>requests.filter(r=>r.jessicaOrdered&&!r.received),[requests]);
-  const received=useMemo(()=>requests.filter(r=>r.received),[requests]);
-  const [tab,setTab]=useState("order");
+// ── JESSICA DASHBOARD ─────────────────────────────────────────────────────────
+function JessicaDash(props) {
+  var requests=props.requests, onSave=props.onSave;
+  var _t=useState("order"); var tab=_t[0]; var setTab=_t[1];
 
-  async function markOrdered(id){await onSave(requests.map(r=>r.id===id?{...r,jessicaOrdered:true,dateOrdered:today()}:r));}
-  async function markReceived(id){await onSave(requests.map(r=>r.id===id?{...r,received:true,dateReceived:today()}:r));}
-  async function markAllOrdered(){const ids=toOrder.map(r=>r.id);await onSave(requests.map(r=>ids.includes(r.id)?{...r,jessicaOrdered:true,dateOrdered:today()}:r));}
-  const orderTotal=toOrder.reduce((s,r)=>s+(getTotal(r)||0),0);
+  var toOrder  = useMemo(function(){return requests.filter(function(r){return r.jdApproval==="Approved"&&!r.jessicaOrdered;});}, [requests]);
+  var ordered  = useMemo(function(){return requests.filter(function(r){return r.jessicaOrdered&&!r.received;});}, [requests]);
+  var received = useMemo(function(){return requests.filter(function(r){return r.received;});}, [requests]);
 
-  return(
+  function markOrdered(id){onSave(requests.map(function(r){return r.id===id?Object.assign({},r,{jessicaOrdered:true,dateOrdered:today()}):r;}));}
+  function markReceived(id){onSave(requests.map(function(r){return r.id===id?Object.assign({},r,{received:true,dateReceived:today()}):r;}));}
+  function markAllOrdered(){var ids=toOrder.map(function(r){return r.id;});onSave(requests.map(function(r){return ids.indexOf(r.id)>=0?Object.assign({},r,{jessicaOrdered:true,dateOrdered:today()}):r;}));}
+
+  var orderTotal = toOrder.reduce(function(s,r){return s+(getTotal(r)||0);}, 0);
+
+  return (
     <div style={{maxWidth:1100,margin:"0 auto",padding:"22px 16px",display:"flex",flexDirection:"column",gap:18}} className="fu">
       <div>
         <h2 className="syne" style={{fontSize:20,fontWeight:800}}>Purchasing — Jessica Coons</h2>
-        <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Items approved by JD Bennett, ready to place orders</p>
+        <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>JD-approved items ready to order</p>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
-        {[{v:toOrder.length,l:"Ready to Order",c:"#f04e1f"},{v:fmt$(orderTotal),l:"Order Value",c:"#f04e1f"},{v:ordered.length,l:"In Transit",c:"#1d4ed8"},{v:received.length,l:"Received",c:"#16a34a"}].map(s=>(
-          <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:22}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
-        ))}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+        {[{v:toOrder.length,l:"Ready to Order",c:"#f04e1f"},{v:fmtMoney(orderTotal),l:"Order Value",c:"#f04e1f"},
+          {v:ordered.length,l:"In Transit",c:"#1d4ed8"},{v:received.length,l:"Received",c:"#16a34a"}].map(function(s){return (
+          <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:20}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
+        );})}
       </div>
       <div className="tabs">
-        {[["order",`🛒 To Order (${toOrder.length})`],["ordered",`📦 Ordered (${ordered.length})`],["received",`✅ Received (${received.length})`]].map(([k,l])=>(
-          <button key={k} className={`tab${tab===k?" on":""}`} onClick={()=>setTab(k)}>{l}</button>
-        ))}
+        {[["order","🛒 To Order ("+toOrder.length+")"],["ordered","📦 Ordered ("+ordered.length+")"],["received","✅ Received ("+received.length+")"]].map(function(kl){return (
+          <button key={kl[0]} className={"tab"+(tab===kl[0]?" on":"")} onClick={function(){setTab(kl[0]);}}>{kl[1]}</button>
+        );})}
       </div>
-      {tab==="order"&&(
+      {tab==="order" && (
         <div className="card">
           <div className="card-hd">
-            <h3>Items Ready to Order</h3>
+            <h3>Ready to Order</h3>
             <div style={{display:"flex",gap:10,alignItems:"center"}}>
-              {toOrder.length>0&&<span style={{fontWeight:700,color:"#16a34a",fontSize:13}}>Total: {fmt$(orderTotal)}</span>}
+              {toOrder.length>0&&<span style={{fontWeight:700,color:"#16a34a",fontSize:13}}>Total: {fmtMoney(orderTotal)}</span>}
               <button className="btn btn-orange btn-sm" disabled={toOrder.length===0} onClick={markAllOrdered}>Mark All Ordered</button>
             </div>
           </div>
-          {toOrder.length===0?<div className="empty"><div className="empty-icon">✅</div><p>Nothing to order right now!</p></div>:(
+          {toOrder.length===0 ? <div className="empty"><div className="empty-icon">✅</div><p>Nothing to order!</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
-              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Details</th><th>Phase</th><th>Action</th></tr></thead>
-              <tbody>{toOrder.map(r=>(
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Action</th></tr></thead>
+              <tbody>{toOrder.map(function(r){return (
                 <tr key={r.id}>
                   <td style={{fontWeight:600}}>{r.studentName}</td>
                   <td style={{maxWidth:180,fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
                   <td style={{fontSize:12}}>{r.vendor}</td>
                   <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
                   <td style={{textAlign:"center"}}>{r.quantity}</td>
-                  <td>{fmt$(r.pricePerUnit)}</td>
-                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                  <td style={{maxWidth:130,fontSize:11,color:"#9ca3af"}}>{r.additionalDetails||"—"}</td>
-                  <td style={{fontSize:11,color:"#9ca3af"}}>{r.phase.split("—")[0].trim()}</td>
-                  <td><button className="btn btn-orange btn-sm" onClick={()=>markOrdered(r.id)}>Mark Ordered</button></td>
+                  <td>{fmtMoney(r.pricePerUnit)}</td>
+                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
+                  <td><button className="btn btn-orange btn-sm" onClick={function(){markOrdered(r.id);}}>Mark Ordered</button></td>
                 </tr>
-              ))}</tbody>
+              );})}</tbody>
             </table></div>
           )}
         </div>
       )}
-      {tab==="ordered"&&(
+      {tab==="ordered" && (
         <div className="card">
-          <div className="card-hd"><h3>Ordered — Awaiting Arrival</h3></div>
-          {ordered.length===0?<div className="empty"><p>No items in transit.</p></div>:(
+          <div className="card-hd"><h3>In Transit</h3></div>
+          {ordered.length===0 ? <div className="empty"><p>Nothing in transit.</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
               <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Date Ordered</th><th>Action</th></tr></thead>
-              <tbody>{ordered.map(r=>(
+              <tbody>{ordered.map(function(r){return (
                 <tr key={r.id}>
                   <td style={{fontWeight:600}}>{r.studentName}</td>
                   <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
                   <td style={{fontSize:12}}>{r.vendor}</td>
-                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
                   <td style={{fontSize:12}}>{r.dateOrdered||"—"}</td>
-                  <td><button className="btn btn-green btn-sm" onClick={()=>markReceived(r.id)}>✓ Mark Received</button></td>
+                  <td><button className="btn btn-green btn-sm" onClick={function(){markReceived(r.id);}}>✓ Received</button></td>
                 </tr>
-              ))}</tbody>
+              );})}</tbody>
             </table></div>
           )}
         </div>
       )}
-      {tab==="received"&&(
+      {tab==="received" && (
         <div className="card">
-          <div className="card-hd"><h3>Received Items</h3></div>
-          {received.length===0?<div className="empty"><p>No items received yet.</p></div>:(
+          <div className="card-hd"><h3>Received</h3></div>
+          {received.length===0 ? <div className="empty"><p>Nothing received yet.</p></div> : (
             <div style={{overflowX:"auto"}}><table className="tbl">
               <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Ordered</th><th>Received</th></tr></thead>
-              <tbody>{received.map(r=>(
+              <tbody>{received.map(function(r){return (
                 <tr key={r.id}>
                   <td style={{fontWeight:600}}>{r.studentName}</td>
                   <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
                   <td style={{fontSize:12}}>{r.vendor}</td>
-                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
                   <td style={{fontSize:11}}>{r.dateOrdered||"—"}</td>
                   <td style={{fontSize:11}}>{r.dateReceived||"—"}</td>
                 </tr>
-              ))}</tbody>
+              );})}</tbody>
             </table></div>
           )}
         </div>
@@ -847,38 +858,53 @@ function JessicaDash({user,requests,onSave}){
   );
 }
 
-function App(){
-  const [user,setUser]=useState(null);
-  const [requests,setRequests]=useState(null);
+// ── ROOT ──────────────────────────────────────────────────────────────────────
+function App() {
+  var _u=useState(null); var user=_u[0]; var setUser=_u[1];
+  var _r=useState(null); var requests=_r[0]; var setRequests=_r[1];
+  var _ls=useState(null); var lastSync=_ls[0]; var setLastSync=_ls[1];
 
-  const [lastSync,setLastSync]=useState(null);
-  const refresh=useCallback(function(){ dbGet("makerslab-v2").then(function(d){setRequests(d||[]);setLastSync(new Date().toLocaleTimeString());}); },[]);
-  useEffect(()=>{ refresh(); const t=setInterval(refresh,30000); return()=>clearInterval(t); },[refresh]);
-  const handleSave=useCallback(function(u){ setRequests(u); return dbSet("makerslab-v2",u); },[]);
+  function refresh() {
+    dbLoad(function(data) {
+      setRequests(data);
+      setLastSync(new Date().toLocaleTimeString());
+    });
+  }
 
-  if(requests===null) return(
+  useEffect(function() {
+    refresh();
+    var t = setInterval(refresh, 30000);
+    return function(){ clearInterval(t); };
+  }, []);
+
+  function handleSave(updated) {
+    setRequests(updated);
+    dbSave(updated, null);
+  }
+
+  if (requests === null) return (
     <div style={{minHeight:"100vh",background:"#0f1117",display:"flex",alignItems:"center",justifyContent:"center"}}>
       <GlobalStyles/>
       <div style={{textAlign:"center"}}>
         <div style={{width:36,height:36,border:"3px solid #1f2937",borderTopColor:"#f04e1f",borderRadius:"50%",margin:"0 auto 12px",animation:"spin .7s linear infinite"}}/>
         <p style={{color:"#6b7280",fontSize:12}}>Loading…</p>
       </div>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style>
     </div>
   );
 
-  if(!user) return <><GlobalStyles/><Login onLogin={setUser}/></>;
+  if (!user) return <><GlobalStyles/><Login onLogin={setUser}/></>;
 
-  return(
+  return (
     <>
       <GlobalStyles/>
       <div style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
-        <Topbar user={user} onLogout={()=>setUser(null)} onRefresh={refresh} lastSync={lastSync}/>
+        <Topbar user={user} onLogout={function(){setUser(null);}} onRefresh={refresh} lastSync={lastSync}/>
         <main style={{flex:1}}>
-          {user.role==="student" && <StudentPortal user={user} requests={requests} onSave={handleSave}/>}
-          {user.role==="teacher" && <TeacherDash   user={user} requests={requests} onSave={handleSave}/>}
-          {user.role==="jd"      && <JDDash        user={user} requests={requests} onSave={handleSave}/>}
-          {user.role==="jessica" && <JessicaDash   user={user} requests={requests} onSave={handleSave}/>}
+          {user.role==="student"  && <StudentPortal user={user} requests={requests} onSave={handleSave}/>}
+          {user.role==="teacher"  && <TeacherDash   user={user} requests={requests} onSave={handleSave}/>}
+          {user.role==="jd"       && <JDDash        user={user} requests={requests} onSave={handleSave}/>}
+          {user.role==="jessica"  && <JessicaDash   user={user} requests={requests} onSave={handleSave}/>}
         </main>
       </div>
     </>
