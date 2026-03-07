@@ -448,9 +448,9 @@ function TeacherDash({user,requests,onSave}){
     return l;
   },[requests,filterS,filterP]);
 
-  async function setStatus(id,status){await onSave(requests.map(r=>r.id===id?{...r,teacherStatus:status,teacherNotes:notes}:r));setSel(null);setNotes("");}
-  async function toggleHold(id){await onSave(requests.map(r=>r.id===id?{...r,onHold:!r.onHold}:r));}
-  async function submitBatch(ids){await onSave(requests.map(r=>ids.includes(r.id)?{...r,submittedForOrder:true,dateSubmitted:today()}:r));}
+  function setStatus(id,status){ const updated=requests.map(r=>r.id===id?{...r,teacherStatus:status,teacherNotes:notes}:r); onSave(updated).then(()=>{setSel(null);setNotes("");}); }
+  function toggleHold(id){ onSave(requests.map(r=>r.id===id?{...r,onHold:!r.onHold}:r)); }
+  function submitBatch(ids){ onSave(requests.map(r=>ids.includes(r.id)?{...r,submittedForOrder:true,dateSubmitted:today()}:r)); }
   const batchTotal=readySend.reduce((s,r)=>s+(getTotal(r)||0),0);
 
   function TRow({r,actions}){
@@ -620,14 +620,14 @@ function TeacherDash({user,requests,onSave}){
 }
 
 function JDDash({user,requests,onSave}){
-  const toReview=useMemo(()=>requests.filter(r=>r.submittedForOrder&&r.jdApproval==="Pending"),[requests]);
+  const toReview=useMemo(()=>requests.filter(r=>r.submittedForOrder===true&&(r.jdApproval==="Pending"||!r.jdApproval)),[requests]);
   const approved=useMemo(()=>requests.filter(r=>r.jdApproval==="Approved"&&!r.jessicaOrdered),[requests]);
   const history =useMemo(()=>requests.filter(r=>r.jessicaOrdered||r.received),[requests]);
   const [tab,setTab]=useState("review");
   const [sel,setSel]=useState(null);
   const [notes,setNotes]=useState("");
 
-  async function decide(id,decision){await onSave(requests.map(r=>r.id===id?{...r,jdApproval:decision,jdNotes:notes}:r));setSel(null);setNotes("");}
+  function decide(id,decision){ const updated=requests.map(r=>r.id===id?{...r,jdApproval:decision,jdNotes:notes}:r); onSave(updated).then(()=>{setSel(null);setNotes("");}); }
   const reviewTotal=toReview.reduce((s,r)=>s+(getTotal(r)||0),0);
   const approvedTotal=approved.reduce((s,r)=>s+(getTotal(r)||0),0);
 
