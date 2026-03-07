@@ -214,6 +214,7 @@ function StatusBadge(props) {
   if (r.teacherStatus==="Approved") return <span className="badge b-appr">Approved</span>;
   if (r.teacherStatus==="Denied")   return <span className="badge b-deny">Denied</span>;
   if (r.teacherStatus==="Revision") return <span className="badge b-revise">Needs Changes</span>;
+  if (r.teacherStatus==="Withdrawn") return <span className="badge" style={{background:"#f3f4f6",color:"#6b7280"}}>Withdrawn</span>;
   if (r.onHold)                     return <span className="badge b-hold">On Hold</span>;
   return <span className="badge b-pend">Pending</span>;
 }
@@ -434,7 +435,11 @@ function StudentPortal(props) {
         {mine.length===0 ? <div className="empty"><div className="empty-icon">📋</div><p>No requests yet. Hit the button above to start!</p></div> : (
           <div style={{display:"flex",flexDirection:"column"}}>
             {mine.map(function(r){
-              var steps = [
+              var isWithdrawn = r.teacherStatus==="Withdrawn";
+              var steps = isWithdrawn ? [
+                {label:"Submitted",done:true,date:r.createdAt},
+                {label:"Withdrawn",done:true,date:r.withdrawnAt?new Date(r.withdrawnAt).toLocaleDateString():null,withdrawn:true},
+              ] : [
                 {label:"Submitted",done:true,date:r.createdAt},
                 {label:"Teacher Review",done:r.teacherStatus==="Approved"||r.teacherStatus==="Denied"||r.submittedForOrder,date:r.teacherActionAt?new Date(r.teacherActionAt).toLocaleDateString():null,denied:r.teacherStatus==="Denied",note:r.teacherStatus==="Revision"?"⚠ "+r.teacherNotes:r.teacherStatus==="Denied"?r.teacherNotes:null},
                 {label:"Sent to Purchasing",done:r.submittedForOrder,date:r.dateSubmitted},
@@ -455,8 +460,9 @@ function StudentPortal(props) {
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <StatusBadge r={r}/>
                     {r.teacherStatus==="Revision"&&<button className="btn btn-yellow btn-sm" onClick={function(){openRevise(r);}}>Edit →</button>}
-                    {r.jessicaOrdered&&!r.received&&<button className="btn btn-green btn-sm" onClick={function(){onSave(requests.map(function(x){return x.id===r.id?Object.assign({},x,{received:true,dateReceived:today(),receivedAt:new Date().toISOString(),receivedBy:user.name}):x;}));}}>✓ It Arrived!</button>}
+                    {r.jessicaOrdered&&!r.received&&r.teacherStatus!=="Withdrawn"&&<button className="btn btn-green btn-sm" onClick={function(){onSave(requests.map(function(x){return x.id===r.id?Object.assign({},x,{received:true,dateReceived:today(),receivedAt:new Date().toISOString(),receivedBy:user.name}):x;}));}}>✓ It Arrived!</button>}
                     {r.teacherStatus==="Denied"&&!r.submittedForOrder&&<button className="btn btn-ghost btn-sm" style={{borderColor:"#fca5a5",color:"#991b1b"}} onClick={function(){openRevise(r);}}>Edit &amp; Resubmit →</button>}
+                    {!r.jessicaOrdered&&!r.received&&r.teacherStatus!=="Denied"&&<button className="btn btn-ghost btn-sm" style={{color:T.text3,fontSize:11}} onClick={function(){if(window.confirm("Withdraw this request? You can add a note explaining why.")){var reason=window.prompt("Optional: why are you withdrawing? (e.g. found a different solution, no longer needed)");onSave(requests.map(function(x){return x.id===r.id?Object.assign({},x,{teacherStatus:"Withdrawn",teacherNotes:reason?"Withdrawn by student: "+reason:"Withdrawn by student",withdrawnAt:new Date().toISOString(),withdrawnBy:user.name}):x;}));}}}>Withdraw</button>}
                   </div>
                 </div>
                 {r.teacherNotes&&<div style={{background:r.teacherStatus==="Revision"?"#fffbeb":r.teacherStatus==="Denied"?"#fef2f2":"#f0fdf4",border:"1px solid "+(r.teacherStatus==="Revision"?"#fde68a":r.teacherStatus==="Denied"?"#fecaca":"#bbf7d0"),borderRadius:8,padding:"8px 12px",fontSize:12,color:r.teacherStatus==="Revision"?"#92400e":r.teacherStatus==="Denied"?"#991b1b":"#15803d"}}>
@@ -466,8 +472,8 @@ function StudentPortal(props) {
                   {steps.map(function(step,i){return (
                     <React.Fragment key={i}>
                       <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:80}}>
-                        <div style={{width:20,height:20,borderRadius:"50%",background:step.denied?"#fecaca":step.done?T.green:"#e5e7eb",border:"2px solid "+(step.denied?T.red:step.done?T.green:"#d1d5db"),display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:step.denied?T.red:step.done?"#fff":"#9ca3af",flexShrink:0}}>
-                          {step.denied?"✗":step.done?"✓":""}
+                        <div style={{width:20,height:20,borderRadius:"50%",background:step.withdrawn?"#f3f4f6":step.denied?"#fecaca":step.done?T.green:"#e5e7eb",border:"2px solid "+(step.withdrawn?"#d1d5db":step.denied?T.red:step.done?T.green:"#d1d5db"),display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:step.withdrawn?"#6b7280":step.denied?T.red:step.done?"#fff":"#9ca3af",flexShrink:0}}>
+                          {step.withdrawn?"—":step.denied?"✗":step.done?"✓":""}
                         </div>
                         <div style={{fontSize:9.5,color:step.done?T.text1:T.text3,fontWeight:step.done?500:400,textAlign:"center",lineHeight:1.2}}>{step.label}</div>
                         {step.date&&<div style={{fontSize:9,color:T.text3,textAlign:"center"}}>{step.date}</div>}
@@ -815,7 +821,7 @@ function TeacherDash(props) {
                   <td style={{fontSize:12,color:T.text2}}>{r.vendor}</td>
                   <td style={{fontWeight:600}}>{fmtMoney(getTotal(r))}</td>
                   <td style={{fontSize:11,color:T.text2}}>{r.dateSubmitted||"—"}</td>
-                  <td>{r.jdApproval==="Approved"?<span className="badge b-appr">Approved</span>:r.jdApproval==="Denied"?<span className="badge b-deny">Denied</span>:<span className="badge b-pend">Pending</span>}</td>
+                  <td>{r.teacherStatus==="Withdrawn"?<span className="badge" style={{background:"#f3f4f6",color:"#6b7280"}}>Withdrawn</span>:r.jdApproval==="Approved"?<span className="badge b-appr">Approved</span>:r.jdApproval==="Denied"?<span className="badge b-deny">Denied</span>:<span className="badge b-pend">Pending</span>}</td>
                   <td>{r.jessicaOrdered?<span className="badge b-ordr">✓</span>:"—"}</td>
                   <td>{r.received?<span className="badge b-recv" title={"Received "+(r.dateReceived||"")+(r.receivedBy?" by "+r.receivedBy:"")}>✓ {r.dateReceived}</span>:r.jessicaOrdered?<button className="btn btn-green btn-sm" onClick={function(){onSave(requests.map(function(x){return x.id===r.id?Object.assign({},x,{received:true,dateReceived:today(),receivedAt:new Date().toISOString(),receivedBy:"Mr. Weymuth"}):x;}));}}>✓ Mark Arrived</button>:"—"}</td>
                 </tr>
