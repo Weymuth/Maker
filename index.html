@@ -7,46 +7,50 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <style>body{margin:0}#root{min-height:100vh}</style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SUPABASE CONFIG — paste your values from supabase.com/dashboard
-// Project Settings → API → Project URL and anon/public key
-// ═══════════════════════════════════════════════════════════════════════════
 const SUPABASE_URL  = "https://qkzjwupaxsdholcnckkc.supabase.co";
 const SUPABASE_ANON = "sb_publishable_71sB21Eg-ESIXbmBLz8x-A_oJV-Q-Q6";
-// ═══════════════════════════════════════════════════════════════════════════
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+// Try Supabase, fall back to localStorage if anything fails
+let sbClient = null;
+try {
+  sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+} catch(e) {
+  console.warn("Supabase init failed, using localStorage", e);
+}
 
-// Storage interface — reads/writes to Supabase kv_store table
-// Table structure: key text primary key, value jsonb
 const storage = {
   async get(key) {
-    const { data, error } = await supabase.from("kv_store").select("value").eq("key", key).single();
-    if (error || !data) return null;
-    return { key, value: typeof data.value === "string" ? data.value : JSON.stringify(data.value) };
+    if (sbClient) {
+      try {
+        const { data, error } = await sbClient.from("kv_store").select("value").eq("key", key).single();
+        if (!error && data) return { key, value: typeof data.value === "string" ? data.value : JSON.stringify(data.value) };
+      } catch(e) { console.warn("Supabase read failed", e); }
+    }
+    const v = localStorage.getItem(key);
+    return v ? { key, value: v } : null;
   },
   async set(key, value) {
-    const { error } = await supabase.from("kv_store").upsert({ key, value: JSON.parse(value) }, { onConflict: "key" });
-    if (error) console.error("Supabase write error:", error);
+    if (sbClient) {
+      try {
+        const { error } = await sbClient.from("kv_store").upsert({ key, value: JSON.parse(value) }, { onConflict: "key" });
+        if (!error) return { key, value };
+      } catch(e) { console.warn("Supabase write failed", e); }
+    }
+    localStorage.setItem(key, value);
     return { key, value };
   },
 };
 
-async function dbGet(k) {
-  try { const r = await storage.get(k); return r ? JSON.parse(r.value) : null; } catch { return null; }
-}
-async function dbSet(k, v) {
-  try { await storage.set(k, JSON.stringify(v)); } catch(e) { console.error(e); }
-}
+async function dbGet(k) { try { const r=await storage.get(k); return r?JSON.parse(r.value):null; } catch { return null; } }
+async function dbSet(k,v) { try { await storage.set(k,JSON.stringify(v)); } catch(e) { console.error(e); } }
 
-// ── AUTH — swap signIn() for Google OAuth when deploying ──────────────────
 const AUTH_CONFIG = {
   teacher: { passcode:"makers2025",  label:"Mr. Weymuth"   },
   jd:      { passcode:"jdb2025",     label:"JD Bennett"    },
@@ -133,8 +137,7 @@ const GlobalStyles = () => (
   .modal-hd h2{font-family:'Syne',sans-serif;font-size:17px;font-weight:700}
   .modal-bd{padding:20px 22px;display:flex;flex-direction:column;gap:14px}
   .modal-ft{padding:14px 22px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:0;background:#fff}
-  .revise-banner{background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:12px 16px;display:flex;flex-direction:column;gap:4px}
-  .db-error{background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:14px 18px;color:#991b1b;font-size:13px}
+  .revise-banner{background:#fffbeb;border:1.5px solid #fcd34d;border-radius:10px;padding:12px 16px}
 `}</style>
 );
 
@@ -171,7 +174,6 @@ function Topbar({user,onLogout}){
   );
 }
 
-// ═══ LOGIN ════════════════════════════════════════════════════════════════
 function Login({onLogin}){
   const [mode,setMode]=useState(null);
   const [studentName,setStudentName]=useState("");
@@ -253,7 +255,6 @@ function Login({onLogin}){
   );
 }
 
-// ═══ STUDENT PORTAL ══════════════════════════════════════════════════════════
 const EMPTY={itemDescription:"",vendor:"",vendorOther:"",link:"",quantity:"",pricePerUnit:"",consumableOrDurable:"Consumable",additionalDetails:"",phase:PHASES[0]};
 
 function StudentPortal({user,requests,onSave}){
@@ -273,8 +274,8 @@ function StudentPortal({user,requests,onSave}){
       itemDescription:r.itemDescription,
       vendor:VENDORS.includes(r.vendor)?r.vendor:"Other",
       vendorOther:VENDORS.includes(r.vendor)?"":r.vendor,
-      link:r.link||"", quantity:String(r.quantity), pricePerUnit:String(r.pricePerUnit),
-      consumableOrDurable:r.consumableOrDurable, additionalDetails:r.additionalDetails||"", phase:r.phase,
+      link:r.link||"",quantity:String(r.quantity),pricePerUnit:String(r.pricePerUnit),
+      consumableOrDurable:r.consumableOrDurable,additionalDetails:r.additionalDetails||"",phase:r.phase,
     });
     setShowForm(true);
   }
@@ -291,37 +292,21 @@ function StudentPortal({user,requests,onSave}){
 
   async function submit(e){
     e.preventDefault();
-    const ev=validate(); if(Object.keys(ev).length){setErrors(ev);return;}
+    const ev=validate();if(Object.keys(ev).length){setErrors(ev);return;}
     setSaving(true);
     const vendorVal=form.vendor==="Other"?form.vendorOther.trim():form.vendor;
     if(editingId){
-      const updated=requests.map(r=>r.id===editingId?{
-        ...r, itemDescription:form.itemDescription.trim(), vendor:vendorVal,
-        link:form.link.trim(), quantity:Number(form.quantity), pricePerUnit:Number(form.pricePerUnit),
-        consumableOrDurable:form.consumableOrDurable, additionalDetails:form.additionalDetails.trim(),
-        phase:form.phase, teacherStatus:"Pending", teacherNotes:"", revisedAt:today(),
-      }:r);
+      const updated=requests.map(r=>r.id===editingId?{...r,itemDescription:form.itemDescription.trim(),vendor:vendorVal,link:form.link.trim(),quantity:Number(form.quantity),pricePerUnit:Number(form.pricePerUnit),consumableOrDurable:form.consumableOrDurable,additionalDetails:form.additionalDetails.trim(),phase:form.phase,teacherStatus:"Pending",teacherNotes:"",revisedAt:today()}:r);
       await onSave(updated);
     }else{
-      const req={
-        id:genId(), studentName:user.name,
-        itemDescription:form.itemDescription.trim(), vendor:vendorVal,
-        link:form.link.trim(), quantity:Number(form.quantity), pricePerUnit:Number(form.pricePerUnit),
-        consumableOrDurable:form.consumableOrDurable, additionalDetails:form.additionalDetails.trim(),
-        phase:form.phase, onHold:false, teacherStatus:"Pending", teacherNotes:"",
-        submittedForOrder:false, dateSubmitted:null,
-        jdApproval:"Pending", jdNotes:"",
-        jessicaOrdered:false, dateOrdered:null,
-        received:false, dateReceived:null, createdAt:today(),
-      };
+      const req={id:genId(),studentName:user.name,itemDescription:form.itemDescription.trim(),vendor:vendorVal,link:form.link.trim(),quantity:Number(form.quantity),pricePerUnit:Number(form.pricePerUnit),consumableOrDurable:form.consumableOrDurable,additionalDetails:form.additionalDetails.trim(),phase:form.phase,onHold:false,teacherStatus:"Pending",teacherNotes:"",submittedForOrder:false,dateSubmitted:null,jdApproval:"Pending",jdNotes:"",jessicaOrdered:false,dateOrdered:null,received:false,dateReceived:null,createdAt:today()};
       await onSave([...requests,req]);
     }
     setForm(EMPTY);setShowForm(false);setEditingId(null);setSaving(false);
   }
 
-  const qty=Number(form.quantity), price=Number(form.pricePerUnit);
-  const estTotal=(form.quantity!==""&&form.pricePerUnit!==""&&!isNaN(qty)&&!isNaN(price)&&qty>0&&price>0)
-    ?(qty*price).toFixed(2):null;
+  const qty=Number(form.quantity),price=Number(form.pricePerUnit);
+  const estTotal=(form.quantity!==""&&form.pricePerUnit!==""&&!isNaN(qty)&&!isNaN(price)&&qty>0&&price>0)?(qty*price).toFixed(2):null;
 
   return(
     <div style={{maxWidth:940,margin:"0 auto",padding:"22px 16px",display:"flex",flexDirection:"column",gap:18}} className="fu">
@@ -350,29 +335,20 @@ function StudentPortal({user,requests,onSave}){
       )}
 
       <div className="g3">
-        {[
-          {v:mine.length,l:"Total Requests",c:"#111827"},
-          {v:mine.filter(r=>r.teacherStatus==="Approved").length,l:"Approved",c:"#16a34a"},
-          {v:mine.filter(r=>r.received).length,l:"Received",c:"#1d4ed8"},
-        ].map(s=>(
+        {[{v:mine.length,l:"Total Requests",c:"#111827"},{v:mine.filter(r=>r.teacherStatus==="Approved").length,l:"Approved",c:"#16a34a"},{v:mine.filter(r=>r.received).length,l:"Received",c:"#1d4ed8"}].map(s=>(
           <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
         ))}
       </div>
 
       <div className="card">
         <div className="card-hd"><h3>My Requests</h3><span style={{color:"#9ca3af",fontSize:12}}>{mine.length} item{mine.length!==1?"s":""}</span></div>
-        {mine.length===0?(
-          <div className="empty"><div className="empty-icon">📋</div><p>No requests yet. Hit "New Request" to get started!</p></div>
-        ):(
+        {mine.length===0?<div className="empty"><div className="empty-icon">📋</div><p>No requests yet. Hit "New Request" to get started!</p></div>:(
           <div style={{overflowX:"auto"}}>
             <table className="tbl">
               <thead><tr><th>Item</th><th>Vendor</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Status</th><th>Teacher Notes</th><th></th></tr></thead>
               <tbody>{mine.map(r=>(
                 <tr key={r.id} className={r.teacherStatus==="Revision"?"revise-row":""}>
-                  <td style={{maxWidth:200}}>
-                    <div style={{fontWeight:500}}>{r.itemDescription}</div>
-                    {r.additionalDetails&&<div style={{color:"#9ca3af",fontSize:11,marginTop:1}}>{r.additionalDetails.slice(0,55)}{r.additionalDetails.length>55?"…":""}</div>}
-                  </td>
+                  <td style={{maxWidth:200}}><div style={{fontWeight:500}}>{r.itemDescription}</div>{r.additionalDetails&&<div style={{color:"#9ca3af",fontSize:11,marginTop:1}}>{r.additionalDetails.slice(0,55)}{r.additionalDetails.length>55?"…":""}</div>}</td>
                   <td style={{fontSize:12}}>{r.link?<a href={r.link} target="_blank" rel="noreferrer">{r.vendor} ↗</a>:r.vendor}</td>
                   <td style={{textAlign:"center"}}>{r.quantity}</td>
                   <td>{fmt$(r.pricePerUnit)}</td>
@@ -396,83 +372,54 @@ function StudentPortal({user,requests,onSave}){
               <h2>{editingId?"✏️ Edit & Resubmit Request":"New Purchase Request"}</h2>
               <button onClick={()=>setShowForm(false)} style={{background:"none",border:"none",fontSize:22,color:"#9ca3af",cursor:"pointer",lineHeight:1}}>×</button>
             </div>
-            {editingId&&(
-              <div style={{background:"#fffbeb",borderBottom:"1px solid #fcd34d",padding:"10px 22px",fontSize:12.5,color:"#92400e"}}>
-                ⚠️ Make your changes and resubmit — it goes back to your teacher for review.
-              </div>
-            )}
+            {editingId&&<div style={{background:"#fffbeb",borderBottom:"1px solid #fcd34d",padding:"10px 22px",fontSize:12.5,color:"#92400e"}}>⚠️ Make your changes and resubmit — it goes back to your teacher for review.</div>}
             <form onSubmit={submit}>
               <div className="modal-bd">
-                <div className="field">
-                  <label>Type</label>
+                <div className="field"><label>Type</label>
                   <select className="inp" value={form.consumableOrDurable} onChange={e=>sf("consumableOrDurable",e.target.value)}>
                     <option value="Consumable">Consumable (used up)</option>
                     <option value="Durable">Durable (reused next year)</option>
                   </select>
                 </div>
-                <div className="field">
-                  <label>Item Description <span className="req">*</span></label>
+                <div className="field"><label>Item Description <span className="req">*</span></label>
                   <input className="inp" value={form.itemDescription} onChange={e=>sf("itemDescription",e.target.value)} placeholder="Be specific — brand, model, size, color…"/>
                   {errors.itemDescription&&<span className="ferr">{errors.itemDescription}</span>}
                 </div>
                 <div className="g2">
-                  <div className="field">
-                    <label>Vendor <span className="req">*</span></label>
+                  <div className="field"><label>Vendor <span className="req">*</span></label>
                     <select className="inp" value={form.vendor} onChange={e=>sf("vendor",e.target.value)}>
-                      <option value="">Select…</option>
-                      {VENDORS.map(v=><option key={v}>{v}</option>)}
-                    </select>
-                    {errors.vendor&&<span className="ferr">{errors.vendor}</span>}
+                      <option value="">Select…</option>{VENDORS.map(v=><option key={v}>{v}</option>)}
+                    </select>{errors.vendor&&<span className="ferr">{errors.vendor}</span>}
                   </div>
-                  {form.vendor==="Other"&&(
-                    <div className="field">
-                      <label>Vendor Name <span className="req">*</span></label>
-                      <input className="inp" value={form.vendorOther} onChange={e=>sf("vendorOther",e.target.value)} placeholder="e.g. Rockler"/>
-                      {errors.vendorOther&&<span className="ferr">{errors.vendorOther}</span>}
-                    </div>
-                  )}
+                  {form.vendor==="Other"&&<div className="field"><label>Vendor Name <span className="req">*</span></label>
+                    <input className="inp" value={form.vendorOther} onChange={e=>sf("vendorOther",e.target.value)} placeholder="e.g. Rockler"/>
+                    {errors.vendorOther&&<span className="ferr">{errors.vendorOther}</span>}
+                  </div>}
                 </div>
-                <div className="field">
-                  <label>Link to Item</label>
+                <div className="field"><label>Link to Item</label>
                   <input className="inp" type="url" value={form.link} onChange={e=>sf("link",e.target.value)} placeholder="https://amazon.com/…"/>
                 </div>
                 <div className="g2">
-                  <div className="field">
-                    <label>Quantity <span className="req">*</span></label>
-                    <input className="inp" type="number" min="1" step="1" value={form.quantity}
-                      onChange={e=>sf("quantity",e.target.value)}
-                      placeholder="How many?"/>
+                  <div className="field"><label>Quantity <span className="req">*</span></label>
+                    <input className="inp" type="number" min="1" step="1" value={form.quantity} onChange={e=>sf("quantity",e.target.value)} placeholder="How many?"/>
                     {errors.quantity&&<span className="ferr">{errors.quantity}</span>}
                   </div>
-                  <div className="field">
-                    <label>Price Per Unit ($) <span className="req">*</span></label>
-                    <input className="inp" type="number" step="0.01" min="0" value={form.pricePerUnit}
-                      onChange={e=>sf("pricePerUnit",e.target.value)}
-                      placeholder="0.00"/>
+                  <div className="field"><label>Price Per Unit ($) <span className="req">*</span></label>
+                    <input className="inp" type="number" step="0.01" min="0" value={form.pricePerUnit} onChange={e=>sf("pricePerUnit",e.target.value)} placeholder="0.00"/>
                     {errors.pricePerUnit&&<span className="ferr">{errors.pricePerUnit}</span>}
                   </div>
                 </div>
-                {estTotal&&(
-                  <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"9px 13px",fontSize:13,color:"#1d4ed8"}}>
-                    💰 Estimated total: <strong>${estTotal}</strong>
-                  </div>
-                )}
-                <div className="field">
-                  <label>Phase — When do you need it?</label>
-                  <select className="inp" value={form.phase} onChange={e=>sf("phase",e.target.value)}>
-                    {PHASES.map(p=><option key={p}>{p}</option>)}
-                  </select>
+                {estTotal&&<div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"9px 13px",fontSize:13,color:"#1d4ed8"}}>💰 Estimated total: <strong>${estTotal}</strong></div>}
+                <div className="field"><label>Phase — When do you need it?</label>
+                  <select className="inp" value={form.phase} onChange={e=>sf("phase",e.target.value)}>{PHASES.map(p=><option key={p}>{p}</option>)}</select>
                 </div>
-                <div className="field">
-                  <label>Additional Details</label>
+                <div className="field"><label>Additional Details</label>
                   <textarea className="inp" rows={3} value={form.additionalDetails} onChange={e=>sf("additionalDetails",e.target.value)} placeholder="Color, size, why you need it, any important specs…" style={{resize:"vertical"}}/>
                 </div>
               </div>
               <div className="modal-ft">
                 <button type="button" onClick={()=>setShowForm(false)} className="btn btn-ghost">Cancel</button>
-                <button type="submit" className={`btn ${editingId?"btn-yellow":"btn-orange"}`} disabled={saving}>
-                  {saving?"Saving…":editingId?"Resubmit for Review →":"Submit Request →"}
-                </button>
+                <button type="submit" className={`btn ${editingId?"btn-yellow":"btn-orange"}`} disabled={saving}>{saving?"Saving…":editingId?"Resubmit for Review →":"Submit Request →"}</button>
               </div>
             </form>
           </div>
@@ -482,7 +429,6 @@ function StudentPortal({user,requests,onSave}){
   );
 }
 
-// ═══ TEACHER DASHBOARD ═══════════════════════════════════════════════════════
 function TeacherDash({user,requests,onSave}){
   const [tab,setTab]=useState("pending");
   const [sel,setSel]=useState(null);
@@ -504,7 +450,6 @@ function TeacherDash({user,requests,onSave}){
   async function setStatus(id,status){await onSave(requests.map(r=>r.id===id?{...r,teacherStatus:status,teacherNotes:notes}:r));setSel(null);setNotes("");}
   async function toggleHold(id){await onSave(requests.map(r=>r.id===id?{...r,onHold:!r.onHold}:r));}
   async function submitBatch(ids){await onSave(requests.map(r=>ids.includes(r.id)?{...r,submittedForOrder:true,dateSubmitted:today()}:r));}
-
   const batchTotal=readySend.reduce((s,r)=>s+(getTotal(r)||0),0);
 
   function TRow({r,actions}){
@@ -535,14 +480,7 @@ function TeacherDash({user,requests,onSave}){
         <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Review requests · request revisions · build purchase batches · send to JD</p>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10}}>
-        {[
-          {v:requests.length,l:"Total",c:"#111827"},
-          {v:pending.length,l:"Pending",c:"#b45309"},
-          {v:requests.filter(r=>r.teacherStatus==="Revision").length,l:"Needs Revision",c:"#d97706"},
-          {v:readySend.length,l:"Ready to Submit",c:"#1d4ed8"},
-          {v:submitted.filter(r=>!r.received).length,l:"In Progress",c:"#7c3aed"},
-          {v:requests.filter(r=>r.received).length,l:"Received",c:"#16a34a"},
-        ].map(s=>(
+        {[{v:requests.length,l:"Total",c:"#111827"},{v:pending.length,l:"Pending",c:"#b45309"},{v:requests.filter(r=>r.teacherStatus==="Revision").length,l:"Needs Revision",c:"#d97706"},{v:readySend.length,l:"Ready to Submit",c:"#1d4ed8"},{v:submitted.filter(r=>!r.received).length,l:"In Progress",c:"#7c3aed"},{v:requests.filter(r=>r.received).length,l:"Received",c:"#16a34a"}].map(s=>(
           <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:22}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
         ))}
       </div>
@@ -556,37 +494,27 @@ function TeacherDash({user,requests,onSave}){
         <div className="card">
           <div className="card-hd"><h3>Awaiting Your Review</h3>{onHold.length>0&&<span style={{fontSize:12,color:"#7c3aed"}}>+ {onHold.length} on hold</span>}</div>
           {pending.length===0?<div className="empty"><div className="empty-icon">🎉</div><p>All caught up!</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Actions</th></tr></thead>
-                <tbody>{pending.map(r=>(
-                  <TRow key={r.id} r={r} actions={r=>(
-                    <div style={{display:"flex",gap:5}}>
-                      <button className="btn btn-green btn-sm" title="Approve" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
-                      <button className="btn btn-yellow btn-sm" title="Request Revision" onClick={()=>{setSel({...r,action:"revise"});setNotes("");}}>✏</button>
-                      <button className="btn btn-red btn-sm" title="Deny" onClick={()=>{setSel({...r,action:"deny"});setNotes("");}}>✗</button>
-                      <button className="btn btn-ghost btn-sm" title="Hold" onClick={()=>toggleHold(r.id)}>⏸</button>
-                    </div>
-                  )}/>
-                ))}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Actions</th></tr></thead>
+              <tbody>{pending.map(r=>(<TRow key={r.id} r={r} actions={r=>(
+                <div style={{display:"flex",gap:5}}>
+                  <button className="btn btn-green btn-sm" title="Approve" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
+                  <button className="btn btn-yellow btn-sm" title="Request Revision" onClick={()=>{setSel({...r,action:"revise"});setNotes("");}}>✏</button>
+                  <button className="btn btn-red btn-sm" title="Deny" onClick={()=>{setSel({...r,action:"deny"});setNotes("");}}>✗</button>
+                  <button className="btn btn-ghost btn-sm" title="Hold" onClick={()=>toggleHold(r.id)}>⏸</button>
+                </div>
+              )}/>))}</tbody>
+            </table></div>
           )}
           {onHold.length>0&&(
             <div style={{borderTop:"1px solid #f3f4f6"}}>
               <div style={{padding:"10px 20px",fontSize:12,fontWeight:600,color:"#7c3aed",background:"#faf5ff"}}>⏸ On Hold ({onHold.length})</div>
-              <div style={{overflowX:"auto"}}>
-                <table className="tbl">
-                  <tbody>{onHold.map(r=>(
-                    <TRow key={r.id} r={r} actions={r=>(
-                      <div style={{display:"flex",gap:5}}>
-                        <button className="btn btn-green btn-sm" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
-                        <button className="btn btn-ghost btn-sm" onClick={()=>toggleHold(r.id)}>Remove Hold</button>
-                      </div>
-                    )}/>
-                  ))}</tbody>
-                </table>
-              </div>
+              <div style={{overflowX:"auto"}}><table className="tbl"><tbody>{onHold.map(r=>(<TRow key={r.id} r={r} actions={r=>(
+                <div style={{display:"flex",gap:5}}>
+                  <button className="btn btn-green btn-sm" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
+                  <button className="btn btn-ghost btn-sm" onClick={()=>toggleHold(r.id)}>Remove Hold</button>
+                </div>
+              )}/>))}</tbody></table></div>
             </div>
           )}
         </div>
@@ -602,17 +530,15 @@ function TeacherDash({user,requests,onSave}){
             </div>
           </div>
           {readySend.length===0?<div className="empty"><div className="empty-icon">📭</div><p>No approved items waiting to submit.</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Action</th></tr></thead>
-                <tbody>{readySend.map(r=>(<TRow key={r.id} r={r} actions={r=>(<button className="btn btn-primary btn-sm" onClick={()=>submitBatch([r.id])}>Submit →</button>)}/>))}</tbody>
-                <tfoot><tr>
-                  <td colSpan={6} style={{textAlign:"right",fontWeight:700,background:"#f9fafb",padding:"10px 12px"}}>Batch Total:</td>
-                  <td style={{fontWeight:700,fontSize:14,background:"#f9fafb",padding:"10px 12px"}}>{fmt$(batchTotal)}</td>
-                  <td colSpan={3} style={{background:"#f9fafb"}}/>
-                </tr></tfoot>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Action</th></tr></thead>
+              <tbody>{readySend.map(r=>(<TRow key={r.id} r={r} actions={r=>(<button className="btn btn-primary btn-sm" onClick={()=>submitBatch([r.id])}>Submit →</button>)}/>))}</tbody>
+              <tfoot><tr>
+                <td colSpan={6} style={{textAlign:"right",fontWeight:700,background:"#f9fafb",padding:"10px 12px"}}>Batch Total:</td>
+                <td style={{fontWeight:700,fontSize:14,background:"#f9fafb",padding:"10px 12px"}}>{fmt$(batchTotal)}</td>
+                <td colSpan={3} style={{background:"#f9fafb"}}/>
+              </tr></tfoot>
+            </table></div>
           )}
         </div>
       )}
@@ -623,22 +549,18 @@ function TeacherDash({user,requests,onSave}){
             <h3>All Requests</h3>
             <div style={{display:"flex",gap:8}}>
               <select className="inp" style={{fontSize:12,padding:"5px 26px 5px 9px",height:30,width:140}} value={filterS} onChange={e=>setFilterS(e.target.value)}>
-                <option value="">All Students</option>
-                {STUDENTS.map(s=><option key={s}>{s}</option>)}
+                <option value="">All Students</option>{STUDENTS.map(s=><option key={s}>{s}</option>)}
               </select>
               <select className="inp" style={{fontSize:12,padding:"5px 26px 5px 9px",height:30,width:130}} value={filterP} onChange={e=>setFilterP(e.target.value)}>
-                <option value="">All Phases</option>
-                {PHASES.map(p=><option key={p} value={p}>{p.split("—")[0].trim()}</option>)}
+                <option value="">All Phases</option>{PHASES.map(p=><option key={p} value={p}>{p.split("—")[0].trim()}</option>)}
               </select>
             </div>
           </div>
           {allF.length===0?<div className="empty"><p>No requests found.</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Status</th></tr></thead>
-                <tbody>{allF.map(r=><TRow key={r.id} r={r} actions={null}/>)}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Phase</th><th>Type</th><th>Status</th></tr></thead>
+              <tbody>{allF.map(r=><TRow key={r.id} r={r} actions={null}/>)}</tbody>
+            </table></div>
           )}
         </div>
       )}
@@ -647,23 +569,21 @@ function TeacherDash({user,requests,onSave}){
         <div className="card">
           <div className="card-hd"><h3>Submitted to JD / In Progress</h3></div>
           {submitted.length===0?<div className="empty"><p>Nothing submitted yet.</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Submitted</th><th>JD</th><th>Ordered</th><th>Received</th></tr></thead>
-                <tbody>{submitted.map(r=>(
-                  <tr key={r.id}>
-                    <td style={{fontWeight:600}}>{r.studentName}</td>
-                    <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
-                    <td style={{fontSize:12}}>{r.vendor}</td>
-                    <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                    <td style={{fontSize:11}}>{r.dateSubmitted||"—"}</td>
-                    <td>{r.jdApproval==="Approved"?<span className="badge b-appr">✓</span>:r.jdApproval==="Denied"?<span className="badge b-deny">✗</span>:<span className="badge b-pend">Pending</span>}</td>
-                    <td>{r.jessicaOrdered?<span className="badge b-ordr">✓ {r.dateOrdered}</span>:"—"}</td>
-                    <td>{r.received?<span className="badge b-recv">✓</span>:"—"}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Submitted</th><th>JD</th><th>Ordered</th><th>Received</th></tr></thead>
+              <tbody>{submitted.map(r=>(
+                <tr key={r.id}>
+                  <td style={{fontWeight:600}}>{r.studentName}</td>
+                  <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
+                  <td style={{fontSize:12}}>{r.vendor}</td>
+                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontSize:11}}>{r.dateSubmitted||"—"}</td>
+                  <td>{r.jdApproval==="Approved"?<span className="badge b-appr">✓</span>:r.jdApproval==="Denied"?<span className="badge b-deny">✗</span>:<span className="badge b-pend">Pending</span>}</td>
+                  <td>{r.jessicaOrdered?<span className="badge b-ordr">✓ {r.dateOrdered}</span>:"—"}</td>
+                  <td>{r.received?<span className="badge b-recv">✓</span>:"—"}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
           )}
         </div>
       )}
@@ -681,14 +601,8 @@ function TeacherDash({user,requests,onSave}){
                 <div style={{color:"#6b7280",fontSize:12,marginTop:2}}>{sel.studentName} · {sel.vendor} · {fmt$(getTotal(sel))}</div>
               </div>
               <div className="field">
-                <label>
-                  {sel.action==="approve"?"Note for student (optional)":
-                   sel.action==="revise"?"What needs to change? (student will see this)":"Reason for denial (student will see this)"}
-                  {sel.action!=="approve"&&<span className="req"> *</span>}
-                </label>
-                <textarea className="inp" rows={3} value={notes} onChange={e=>setNotes(e.target.value)}
-                  placeholder={sel.action==="revise"?"e.g. Too expensive — find this on Amazon instead. / Need exact dimensions.":"Reason…"}
-                  style={{resize:"vertical"}}/>
+                <label>{sel.action==="approve"?"Note for student (optional)":sel.action==="revise"?"What needs to change? (student will see this)":"Reason for denial (student will see this)"}{sel.action!=="approve"&&<span className="req"> *</span>}</label>
+                <textarea className="inp" rows={3} value={notes} onChange={e=>setNotes(e.target.value)} placeholder={sel.action==="revise"?"e.g. Too expensive — find on Amazon instead.":"Reason…"} style={{resize:"vertical"}}/>
               </div>
             </div>
             <div className="modal-ft">
@@ -704,7 +618,6 @@ function TeacherDash({user,requests,onSave}){
   );
 }
 
-// ═══ JD DASHBOARD ════════════════════════════════════════════════════════════
 function JDDash({user,requests,onSave}){
   const toReview=useMemo(()=>requests.filter(r=>r.submittedForOrder&&r.jdApproval==="Pending"),[requests]);
   const approved=useMemo(()=>requests.filter(r=>r.jdApproval==="Approved"&&!r.jessicaOrdered),[requests]);
@@ -714,7 +627,6 @@ function JDDash({user,requests,onSave}){
   const [notes,setNotes]=useState("");
 
   async function decide(id,decision){await onSave(requests.map(r=>r.id===id?{...r,jdApproval:decision,jdNotes:notes}:r));setSel(null);setNotes("");}
-
   const reviewTotal=toReview.reduce((s,r)=>s+(getTotal(r)||0),0);
   const approvedTotal=approved.reduce((s,r)=>s+(getTotal(r)||0),0);
 
@@ -725,12 +637,7 @@ function JDDash({user,requests,onSave}){
         <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Review purchase batches submitted by Mr. Weymuth</p>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
-        {[
-          {v:toReview.length,l:"Awaiting Your Review",c:"#b45309"},
-          {v:fmt$(reviewTotal),l:"Batch Value",c:"#b45309"},
-          {v:fmt$(approvedTotal),l:"Approved — Not Yet Ordered",c:"#1d4ed8"},
-          {v:history.length,l:"Ordered / Received",c:"#16a34a"},
-        ].map(s=>(
+        {[{v:toReview.length,l:"Awaiting Your Review",c:"#b45309"},{v:fmt$(reviewTotal),l:"Batch Value",c:"#b45309"},{v:fmt$(approvedTotal),l:"Approved — Not Yet Ordered",c:"#1d4ed8"},{v:history.length,l:"Ordered / Received",c:"#16a34a"}].map(s=>(
           <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:22}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
         ))}
       </div>
@@ -739,84 +646,74 @@ function JDDash({user,requests,onSave}){
           <button key={k} className={`tab${tab===k?" on":""}`} onClick={()=>setTab(k)}>{l}</button>
         ))}
       </div>
-
       {tab==="review"&&(
         <div className="card">
           <div className="card-hd"><h3>Submitted by Mr. Weymuth</h3>{toReview.length>0&&<span style={{fontWeight:700,fontSize:13}}>Batch: {fmt$(reviewTotal)}</span>}</div>
           {toReview.length===0?<div className="empty"><div className="empty-icon">🎉</div><p>Nothing to review right now.</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Type</th><th>Details</th><th>Action</th></tr></thead>
-                <tbody>{toReview.map(r=>(
-                  <tr key={r.id}>
-                    <td style={{fontWeight:600}}>{r.studentName}</td>
-                    <td style={{maxWidth:180,fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
-                    <td style={{fontSize:12}}>{r.vendor}</td>
-                    <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
-                    <td style={{textAlign:"center"}}>{r.quantity}</td>
-                    <td>{fmt$(r.pricePerUnit)}</td>
-                    <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                    <td style={{fontSize:11}}>{r.consumableOrDurable}</td>
-                    <td style={{maxWidth:130,fontSize:11,color:"#9ca3af"}}>{r.additionalDetails||"—"}</td>
-                    <td><div style={{display:"flex",gap:5}}>
-                      <button className="btn btn-green btn-sm" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
-                      <button className="btn btn-red btn-sm" onClick={()=>{setSel({...r,action:"deny"});setNotes("");}}>✗</button>
-                    </div></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Type</th><th>Details</th><th>Action</th></tr></thead>
+              <tbody>{toReview.map(r=>(
+                <tr key={r.id}>
+                  <td style={{fontWeight:600}}>{r.studentName}</td>
+                  <td style={{maxWidth:180,fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
+                  <td style={{fontSize:12}}>{r.vendor}</td>
+                  <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
+                  <td style={{textAlign:"center"}}>{r.quantity}</td>
+                  <td>{fmt$(r.pricePerUnit)}</td>
+                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontSize:11}}>{r.consumableOrDurable}</td>
+                  <td style={{maxWidth:130,fontSize:11,color:"#9ca3af"}}>{r.additionalDetails||"—"}</td>
+                  <td><div style={{display:"flex",gap:5}}>
+                    <button className="btn btn-green btn-sm" onClick={()=>{setSel({...r,action:"approve"});setNotes("");}}>✓</button>
+                    <button className="btn btn-red btn-sm" onClick={()=>{setSel({...r,action:"deny"});setNotes("");}}>✗</button>
+                  </div></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
           )}
         </div>
       )}
-
       {tab==="approved"&&(
         <div className="card">
           <div className="card-hd"><h3>JD Approved — Awaiting Jessica</h3>{approved.length>0&&<span style={{fontWeight:700,color:"#16a34a",fontSize:13}}>{fmt$(approvedTotal)}</span>}</div>
           {approved.length===0?<div className="empty"><p>No items pending order.</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Total</th><th>Submitted</th></tr></thead>
-                <tbody>{approved.map(r=>(
-                  <tr key={r.id}>
-                    <td style={{fontWeight:600}}>{r.studentName}</td>
-                    <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
-                    <td style={{fontSize:12}}>{r.vendor}</td>
-                    <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
-                    <td style={{textAlign:"center"}}>{r.quantity}</td>
-                    <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                    <td style={{fontSize:11}}>{r.dateSubmitted||"—"}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Total</th><th>Submitted</th></tr></thead>
+              <tbody>{approved.map(r=>(
+                <tr key={r.id}>
+                  <td style={{fontWeight:600}}>{r.studentName}</td>
+                  <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
+                  <td style={{fontSize:12}}>{r.vendor}</td>
+                  <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
+                  <td style={{textAlign:"center"}}>{r.quantity}</td>
+                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontSize:11}}>{r.dateSubmitted||"—"}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
           )}
         </div>
       )}
-
       {tab==="history"&&(
         <div className="card">
           <div className="card-hd"><h3>Order History</h3></div>
           {history.length===0?<div className="empty"><p>No completed orders yet.</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Ordered</th><th>Status</th></tr></thead>
-                <tbody>{history.map(r=>(
-                  <tr key={r.id}>
-                    <td style={{fontWeight:600}}>{r.studentName}</td>
-                    <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
-                    <td style={{fontSize:12}}>{r.vendor}</td>
-                    <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                    <td style={{fontSize:11}}>{r.dateOrdered||"—"}</td>
-                    <td><StatusBadge r={r}/></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Ordered</th><th>Status</th></tr></thead>
+              <tbody>{history.map(r=>(
+                <tr key={r.id}>
+                  <td style={{fontWeight:600}}>{r.studentName}</td>
+                  <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
+                  <td style={{fontSize:12}}>{r.vendor}</td>
+                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontSize:11}}>{r.dateOrdered||"—"}</td>
+                  <td><StatusBadge r={r}/></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
           )}
         </div>
       )}
-
       {sel&&(
         <div className="overlay" onClick={e=>e.target===e.currentTarget&&setSel(null)}>
           <div className="modal" style={{maxWidth:460}}>
@@ -830,8 +727,7 @@ function JDDash({user,requests,onSave}){
                 <div style={{color:"#6b7280",fontSize:12,marginTop:2}}>{sel.studentName} · {sel.vendor} · {fmt$(getTotal(sel))}</div>
                 {sel.link&&<a href={sel.link} target="_blank" rel="noreferrer" style={{fontSize:12,color:"#1d4ed8",display:"block",marginTop:4}}>View item ↗</a>}
               </div>
-              <div className="field">
-                <label>Notes (optional)</label>
+              <div className="field"><label>Notes (optional)</label>
                 <textarea className="inp" rows={3} value={notes} onChange={e=>setNotes(e.target.value)} style={{resize:"vertical"}} placeholder="Any notes…"/>
               </div>
             </div>
@@ -846,7 +742,6 @@ function JDDash({user,requests,onSave}){
   );
 }
 
-// ═══ JESSICA DASHBOARD ═══════════════════════════════════════════════════════
 function JessicaDash({user,requests,onSave}){
   const toOrder =useMemo(()=>requests.filter(r=>r.jdApproval==="Approved"&&!r.jessicaOrdered),[requests]);
   const ordered =useMemo(()=>requests.filter(r=>r.jessicaOrdered&&!r.received),[requests]);
@@ -856,7 +751,6 @@ function JessicaDash({user,requests,onSave}){
   async function markOrdered(id){await onSave(requests.map(r=>r.id===id?{...r,jessicaOrdered:true,dateOrdered:today()}:r));}
   async function markReceived(id){await onSave(requests.map(r=>r.id===id?{...r,received:true,dateReceived:today()}:r));}
   async function markAllOrdered(){const ids=toOrder.map(r=>r.id);await onSave(requests.map(r=>ids.includes(r.id)?{...r,jessicaOrdered:true,dateOrdered:today()}:r));}
-
   const orderTotal=toOrder.reduce((s,r)=>s+(getTotal(r)||0),0);
 
   return(
@@ -866,12 +760,7 @@ function JessicaDash({user,requests,onSave}){
         <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Items approved by JD Bennett, ready to place orders</p>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
-        {[
-          {v:toOrder.length,l:"Ready to Order",c:"#f04e1f"},
-          {v:fmt$(orderTotal),l:"Order Value",c:"#f04e1f"},
-          {v:ordered.length,l:"In Transit",c:"#1d4ed8"},
-          {v:received.length,l:"Received",c:"#16a34a"},
-        ].map(s=>(
+        {[{v:toOrder.length,l:"Ready to Order",c:"#f04e1f"},{v:fmt$(orderTotal),l:"Order Value",c:"#f04e1f"},{v:ordered.length,l:"In Transit",c:"#1d4ed8"},{v:received.length,l:"Received",c:"#16a34a"}].map(s=>(
           <div key={s.l} className="stat"><div className="stat-v" style={{color:s.c,fontSize:22}}>{s.v}</div><div className="stat-l">{s.l}</div></div>
         ))}
       </div>
@@ -890,25 +779,23 @@ function JessicaDash({user,requests,onSave}){
             </div>
           </div>
           {toOrder.length===0?<div className="empty"><div className="empty-icon">✅</div><p>Nothing to order right now!</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Details</th><th>Phase</th><th>Action</th></tr></thead>
-                <tbody>{toOrder.map(r=>(
-                  <tr key={r.id}>
-                    <td style={{fontWeight:600}}>{r.studentName}</td>
-                    <td style={{maxWidth:180,fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
-                    <td style={{fontSize:12}}>{r.vendor}</td>
-                    <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
-                    <td style={{textAlign:"center"}}>{r.quantity}</td>
-                    <td>{fmt$(r.pricePerUnit)}</td>
-                    <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                    <td style={{maxWidth:130,fontSize:11,color:"#9ca3af"}}>{r.additionalDetails||"—"}</td>
-                    <td style={{fontSize:11,color:"#9ca3af"}}>{r.phase.split("—")[0].trim()}</td>
-                    <td><button className="btn btn-orange btn-sm" onClick={()=>markOrdered(r.id)}>Mark Ordered</button></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Link</th><th>Qty</th><th>Unit $</th><th>Total</th><th>Details</th><th>Phase</th><th>Action</th></tr></thead>
+              <tbody>{toOrder.map(r=>(
+                <tr key={r.id}>
+                  <td style={{fontWeight:600}}>{r.studentName}</td>
+                  <td style={{maxWidth:180,fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
+                  <td style={{fontSize:12}}>{r.vendor}</td>
+                  <td>{r.link?<a href={r.link} target="_blank" rel="noreferrer">View ↗</a>:"—"}</td>
+                  <td style={{textAlign:"center"}}>{r.quantity}</td>
+                  <td>{fmt$(r.pricePerUnit)}</td>
+                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{maxWidth:130,fontSize:11,color:"#9ca3af"}}>{r.additionalDetails||"—"}</td>
+                  <td style={{fontSize:11,color:"#9ca3af"}}>{r.phase.split("—")[0].trim()}</td>
+                  <td><button className="btn btn-orange btn-sm" onClick={()=>markOrdered(r.id)}>Mark Ordered</button></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
           )}
         </div>
       )}
@@ -916,21 +803,19 @@ function JessicaDash({user,requests,onSave}){
         <div className="card">
           <div className="card-hd"><h3>Ordered — Awaiting Arrival</h3></div>
           {ordered.length===0?<div className="empty"><p>No items in transit.</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Date Ordered</th><th>Action</th></tr></thead>
-                <tbody>{ordered.map(r=>(
-                  <tr key={r.id}>
-                    <td style={{fontWeight:600}}>{r.studentName}</td>
-                    <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
-                    <td style={{fontSize:12}}>{r.vendor}</td>
-                    <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                    <td style={{fontSize:12}}>{r.dateOrdered||"—"}</td>
-                    <td><button className="btn btn-green btn-sm" onClick={()=>markReceived(r.id)}>✓ Mark Received</button></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Date Ordered</th><th>Action</th></tr></thead>
+              <tbody>{ordered.map(r=>(
+                <tr key={r.id}>
+                  <td style={{fontWeight:600}}>{r.studentName}</td>
+                  <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
+                  <td style={{fontSize:12}}>{r.vendor}</td>
+                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontSize:12}}>{r.dateOrdered||"—"}</td>
+                  <td><button className="btn btn-green btn-sm" onClick={()=>markReceived(r.id)}>✓ Mark Received</button></td>
+                </tr>
+              ))}</tbody>
+            </table></div>
           )}
         </div>
       )}
@@ -938,21 +823,19 @@ function JessicaDash({user,requests,onSave}){
         <div className="card">
           <div className="card-hd"><h3>Received Items</h3></div>
           {received.length===0?<div className="empty"><p>No items received yet.</p></div>:(
-            <div style={{overflowX:"auto"}}>
-              <table className="tbl">
-                <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Ordered</th><th>Received</th></tr></thead>
-                <tbody>{received.map(r=>(
-                  <tr key={r.id}>
-                    <td style={{fontWeight:600}}>{r.studentName}</td>
-                    <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
-                    <td style={{fontSize:12}}>{r.vendor}</td>
-                    <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
-                    <td style={{fontSize:11}}>{r.dateOrdered||"—"}</td>
-                    <td style={{fontSize:11}}>{r.dateReceived||"—"}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+            <div style={{overflowX:"auto"}}><table className="tbl">
+              <thead><tr><th>Student</th><th>Item</th><th>Vendor</th><th>Total</th><th>Ordered</th><th>Received</th></tr></thead>
+              <tbody>{received.map(r=>(
+                <tr key={r.id}>
+                  <td style={{fontWeight:600}}>{r.studentName}</td>
+                  <td style={{fontWeight:500,fontSize:13}}>{r.itemDescription}</td>
+                  <td style={{fontSize:12}}>{r.vendor}</td>
+                  <td style={{fontWeight:600}}>{fmt$(getTotal(r))}</td>
+                  <td style={{fontSize:11}}>{r.dateOrdered||"—"}</td>
+                  <td style={{fontSize:11}}>{r.dateReceived||"—"}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
           )}
         </div>
       )}
@@ -960,55 +843,31 @@ function JessicaDash({user,requests,onSave}){
   );
 }
 
-// ═══ ROOT ════════════════════════════════════════════════════════════════════
 function App(){
   const [user,setUser]=useState(null);
   const [requests,setRequests]=useState(null);
-  const [dbError,setDbError]=useState(false);
 
-  useEffect(()=>{
-    if(SUPABASE_URL==="https://qkzjwupaxsdholcnckkc.supabase.co"){
-      setRequests([]);
-      setDbError(true);
-      return;
-    }
-    dbGet("makerslab-v2").then(d=>setRequests(d||[])).catch(()=>{setRequests([]);setDbError(true);});
-  },[]);
-
-  const handleSave=useCallback(async(u)=>{
-    setRequests(u);
-    await dbSet("makerslab-v2",u);
-  },[]);
+  useEffect(()=>{ dbGet("makerslab-v2").then(d=>setRequests(d||[])); },[]);
+  const handleSave=useCallback(async(u)=>{ setRequests(u); await dbSet("makerslab-v2",u); },[]);
 
   if(requests===null) return(
     <div style={{minHeight:"100vh",background:"#0f1117",display:"flex",alignItems:"center",justifyContent:"center"}}>
       <GlobalStyles/>
       <div style={{textAlign:"center"}}>
         <div style={{width:36,height:36,border:"3px solid #1f2937",borderTopColor:"#f04e1f",borderRadius:"50%",margin:"0 auto 12px",animation:"spin .7s linear infinite"}}/>
-        <p style={{color:"#6b7280",fontSize:12}}>Connecting to database…</p>
+        <p style={{color:"#6b7280",fontSize:12}}>Loading…</p>
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 
-  if(!user) return(
-    <>
-      <GlobalStyles/>
-      {dbError&&(
-        <div style={{background:"#7f1d1d",color:"#fca5a5",padding:"10px 20px",fontSize:12.5,textAlign:"center"}}>
-          ⚠️ Database not connected — add your Supabase URL and anon key to index.html to enable shared data
-        </div>
-      )}
-      <Login onLogin={setUser}/>
-    </>
-  );
+  if(!user) return <><GlobalStyles/><Login onLogin={setUser}/></>;
 
   return(
     <>
       <GlobalStyles/>
       <div style={{minHeight:"100vh",display:"flex",flexDirection:"column"}}>
         <Topbar user={user} onLogout={()=>setUser(null)}/>
-        {dbError&&<div style={{background:"#7f1d1d",color:"#fca5a5",padding:"8px 20px",fontSize:12,textAlign:"center"}}>⚠️ Database not connected — data is not shared between users</div>}
         <main style={{flex:1}}>
           {user.role==="student" && <StudentPortal user={user} requests={requests} onSave={handleSave}/>}
           {user.role==="teacher" && <TeacherDash   user={user} requests={requests} onSave={handleSave}/>}
