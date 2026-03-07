@@ -633,6 +633,9 @@ function JDDash({user,requests,onSave}){
 
   return(
     <div style={{maxWidth:1100,margin:"0 auto",padding:"22px 16px",display:"flex",flexDirection:"column",gap:18}} className="fu">
+      <div style={{background:'#1e293b',color:'#94a3b8',fontSize:11,padding:'8px 14px',borderRadius:8,fontFamily:'monospace',marginBottom:4}}>
+        DEBUG: total={requests.length} | submitted={requests.filter(r=>r.submittedForOrder).length} | submittedTrue={requests.filter(r=>r.submittedForOrder===true).length} | pendingJD={requests.filter(r=>r.jdApproval==='Pending').length} | toReview={toReview.length}
+      </div>
       <div>
         <h2 className="syne" style={{fontSize:20,fontWeight:800}}>Department Head — JD Bennett</h2>
         <p style={{color:"#6b7280",fontSize:12.5,marginTop:2}}>Review purchase batches submitted by Mr. Weymuth</p>
