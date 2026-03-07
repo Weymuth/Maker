@@ -25,31 +25,31 @@ try {
   console.warn("Supabase init failed, using localStorage", e);
 }
 
-const storage = {
-  async get(key) {
-    if (sbClient) {
-      try {
-        const { data, error } = await sbClient.from("kv_store").select("value").eq("key", key).single();
-        if (!error && data) return { key, value: typeof data.value === "string" ? data.value : JSON.stringify(data.value) };
-      } catch(e) { console.warn("Supabase read failed", e); }
-    }
-    const v = localStorage.getItem(key);
-    return v ? { key, value: v } : null;
-  },
-  async set(key, value) {
-    if (sbClient) {
-      try {
-        const { error } = await sbClient.from("kv_store").upsert({ key, value: JSON.parse(value) }, { onConflict: "key" });
-        if (!error) return { key, value };
-      } catch(e) { console.warn("Supabase write failed", e); }
-    }
-    localStorage.setItem(key, value);
-    return { key, value };
-  },
-};
+function dbGet(k) {
+  if (sbClient) {
+    return sbClient.from("kv_store").select("value").eq("key",k).single()
+      .then(function(res) {
+        if (res.error || !res.data) return null;
+        var val = res.data.value;
+        return typeof val === "string" ? JSON.parse(val) : val;
+      }).catch(function() { return null; });
+  }
+  try { var v=localStorage.getItem(k); return Promise.resolve(v?JSON.parse(v):null); } catch(e) { return Promise.resolve(null); }
+}
 
-async function dbGet(k) { try { const r=await storage.get(k); return r?JSON.parse(r.value):null; } catch { return null; } }
-async function dbSet(k,v) { try { await storage.set(k,JSON.stringify(v)); } catch(e) { console.error(e); } }
+function dbSet(k,v) {
+  var payload = typeof v === "string" ? JSON.parse(v) : v;
+  console.log("dbSet writing", k, JSON.stringify(payload).slice(0,80));
+  if (sbClient) {
+    return sbClient.from("kv_store").upsert({key:k, value:payload},{onConflict:"key"})
+      .then(function(res) {
+        if (res.error) console.error("Supabase write error", res.error);
+        else console.log("Supabase write OK");
+      }).catch(function(e) { console.error("Supabase write exception", e); });
+  }
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {}
+  return Promise.resolve();
+}
 
 const AUTH_CONFIG = {
   teacher: { passcode:"makers2025",  label:"Mr. Weymuth"   },
@@ -852,9 +852,9 @@ function App(){
   const [requests,setRequests]=useState(null);
 
   const [lastSync,setLastSync]=useState(null);
-  const refresh=useCallback(()=>{ dbGet("makerslab-v2").then(function(d){setRequests(d||[]);setLastSync(new Date().toLocaleTimeString());}); },[]);
+  const refresh=useCallback(function(){ dbGet("makerslab-v2").then(function(d){setRequests(d||[]);setLastSync(new Date().toLocaleTimeString());}); },[]);
   useEffect(()=>{ refresh(); const t=setInterval(refresh,30000); return()=>clearInterval(t); },[refresh]);
-  const handleSave=useCallback((u)=>{ setRequests(u); return dbSet("makerslab-v2",u); },[]);
+  const handleSave=useCallback(function(u){ setRequests(u); return dbSet("makerslab-v2",u); },[]);
 
   if(requests===null) return(
     <div style={{minHeight:"100vh",background:"#0f1117",display:"flex",alignItems:"center",justifyContent:"center"}}>
