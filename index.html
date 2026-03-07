@@ -620,7 +620,7 @@ function TeacherDash({user,requests,onSave}){
 }
 
 function JDDash({user,requests,onSave}){
-  const toReview=useMemo(()=>requests.filter(r=>r.submittedForOrder===true&&(r.jdApproval==="Pending"||!r.jdApproval)),[requests]);
+  const toReview=useMemo(()=>requests.filter(r=>!!r.submittedForOrder&&(r.jdApproval==="Pending"||!r.jdApproval)),[requests]);
   const approved=useMemo(()=>requests.filter(r=>r.jdApproval==="Approved"&&!r.jessicaOrdered),[requests]);
   const history =useMemo(()=>requests.filter(r=>r.jessicaOrdered||r.received),[requests]);
   const [tab,setTab]=useState("review");
@@ -634,7 +634,7 @@ function JDDash({user,requests,onSave}){
   return(
     <div style={{maxWidth:1100,margin:"0 auto",padding:"22px 16px",display:"flex",flexDirection:"column",gap:18}} className="fu">
       <div style={{background:'#1e293b',color:'#94a3b8',fontSize:11,padding:'8px 14px',borderRadius:8,fontFamily:'monospace',marginBottom:4}}>
-        DEBUG: total={requests.length} | submitted={requests.filter(r=>r.submittedForOrder).length} | submittedTrue={requests.filter(r=>r.submittedForOrder===true).length} | pendingJD={requests.filter(r=>r.jdApproval==='Pending').length} | toReview={toReview.length}
+        DEBUG: total={requests.length} | submitted={requests.filter(r=>r.submittedForOrder).length} | submittedTrue={requests.filter(r=>!!r.submittedForOrder).length} | firstVal={requests.length>0?JSON.stringify(requests[0].submittedForOrder):"none"} | pendingJD={requests.filter(r=>r.jdApproval==='Pending').length} | toReview={toReview.length}
       </div>
       <div>
         <h2 className="syne" style={{fontSize:20,fontWeight:800}}>Department Head — JD Bennett</h2>
@@ -852,9 +852,9 @@ function App(){
   const [requests,setRequests]=useState(null);
 
   const [lastSync,setLastSync]=useState(null);
-  const refresh=useCallback(()=>{ dbGet("makerslab-v2").then(d=>{setRequests(d||[]);setLastSync(new Date().toLocaleTimeString());}); },[]);
+  const refresh=useCallback(()=>{ dbGet("makerslab-v2").then(function(d){setRequests(d||[]);setLastSync(new Date().toLocaleTimeString());}); },[]);
   useEffect(()=>{ refresh(); const t=setInterval(refresh,30000); return()=>clearInterval(t); },[refresh]);
-  const handleSave=useCallback(async(u)=>{ setRequests(u); await dbSet("makerslab-v2",u); },[]);
+  const handleSave=useCallback((u)=>{ setRequests(u); return dbSet("makerslab-v2",u); },[]);
 
   if(requests===null) return(
     <div style={{minHeight:"100vh",background:"#0f1117",display:"flex",alignItems:"center",justifyContent:"center"}}>
