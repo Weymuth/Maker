@@ -399,6 +399,18 @@ function StudentPortal(props) {
         <button onClick={openNew} className="btn" style={{background:"#fff",color:"#f04e1f",fontWeight:600}}>+ New Request</button>
       </div>
 
+      {mine.filter(function(r){return r.teacherStatus==="Denied";}).length>0 && mine.filter(function(r){return r.teacherStatus==="Denied";}).map(function(r){return (
+        <div key={r.id} style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:14,padding:"14px 18px"}}>
+          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontWeight:600,fontSize:13,color:"#991b1b",marginBottom:4}}>✗ Request denied — {r.itemDescription}</div>
+              {r.teacherNotes&&<div style={{fontSize:13,color:"#7f1d1d"}}><strong>Mr. Weymuth says:</strong> {r.teacherNotes}</div>}
+              <div style={{fontSize:12,color:"#9ca3af",marginTop:4}}>You can edit and resubmit if you'd like to try again.</div>
+            </div>
+            <button onClick={function(){openRevise(r);}} className="btn btn-ghost btn-sm" style={{borderColor:"#fca5a5",color:"#991b1b"}}>Edit &amp; Resubmit →</button>
+          </div>
+        </div>
+      );})}
       {revisions.length>0 && revisions.map(function(r){return (
         <div key={r.id} className="revise-banner">
           <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
@@ -443,6 +455,8 @@ function StudentPortal(props) {
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
                     <StatusBadge r={r}/>
                     {r.teacherStatus==="Revision"&&<button className="btn btn-yellow btn-sm" onClick={function(){openRevise(r);}}>Edit →</button>}
+                    {r.jessicaOrdered&&!r.received&&<button className="btn btn-green btn-sm" onClick={function(){onSave(requests.map(function(x){return x.id===r.id?Object.assign({},x,{received:true,dateReceived:today(),receivedAt:new Date().toISOString(),receivedBy:user.name}):x;}));}}>✓ It Arrived!</button>}
+                    {r.teacherStatus==="Denied"&&!r.submittedForOrder&&<button className="btn btn-ghost btn-sm" style={{borderColor:"#fca5a5",color:"#991b1b"}} onClick={function(){openRevise(r);}}>Edit &amp; Resubmit →</button>}
                   </div>
                 </div>
                 {r.teacherNotes&&<div style={{background:r.teacherStatus==="Revision"?"#fffbeb":r.teacherStatus==="Denied"?"#fef2f2":"#f0fdf4",border:"1px solid "+(r.teacherStatus==="Revision"?"#fde68a":r.teacherStatus==="Denied"?"#fecaca":"#bbf7d0"),borderRadius:8,padding:"8px 12px",fontSize:12,color:r.teacherStatus==="Revision"?"#92400e":r.teacherStatus==="Denied"?"#991b1b":"#15803d"}}>
@@ -803,7 +817,7 @@ function TeacherDash(props) {
                   <td style={{fontSize:11,color:T.text2}}>{r.dateSubmitted||"—"}</td>
                   <td>{r.jdApproval==="Approved"?<span className="badge b-appr">Approved</span>:r.jdApproval==="Denied"?<span className="badge b-deny">Denied</span>:<span className="badge b-pend">Pending</span>}</td>
                   <td>{r.jessicaOrdered?<span className="badge b-ordr">✓</span>:"—"}</td>
-                  <td>{r.received?<span className="badge b-recv">✓</span>:"—"}</td>
+                  <td>{r.received?<span className="badge b-recv" title={"Received "+(r.dateReceived||"")+(r.receivedBy?" by "+r.receivedBy:"")}>✓ {r.dateReceived}</span>:r.jessicaOrdered?<button className="btn btn-green btn-sm" onClick={function(){onSave(requests.map(function(x){return x.id===r.id?Object.assign({},x,{received:true,dateReceived:today(),receivedAt:new Date().toISOString(),receivedBy:"Mr. Weymuth"}):x;}));}}>✓ Mark Arrived</button>:"—"}</td>
                 </tr>
               );})}</tbody>
             </table></div>
@@ -1043,7 +1057,7 @@ function JDDash(props) {
                       {r.jdActionAt?<div><span className={"badge "+(r.jdApproval==="Approved"?"b-appr":"b-deny")} style={{fontSize:10}}>{r.jdApproval}</span><div style={{fontSize:10,color:T.text3,marginTop:2}}>{new Date(r.jdActionAt).toLocaleDateString()}</div></div>:<span className="badge b-pend" style={{fontSize:10}}>{r.jdApproval||"Pending"}</span>}
                     </td>
                     <td style={{fontSize:11,color:T.text2}}>{r.dateOrdered||"—"}</td>
-                    <td style={{fontSize:11,color:T.text2}}>{r.dateReceived||"—"}</td>
+                    <td style={{fontSize:11,color:T.text2}}>{r.dateReceived||"—"}{r.receivedBy&&<div style={{fontSize:10,color:T.text3}}>by {r.receivedBy}</div>}</td>
                     <td style={{fontSize:11,maxWidth:100}}>{r.trackingNumber?<a href={r.trackingNumber.startsWith("http")?r.trackingNumber:"#"} target="_blank" rel="noreferrer" style={{color:T.blue}}>{r.trackingNumber.length>18?r.trackingNumber.slice(0,18)+"…":r.trackingNumber}</a>:"—"}</td>
                   </tr>
                 );})}</tbody>
